@@ -1,47 +1,59 @@
 {
-  "name": "tr-json-chain",
-  "version": "0.1.0",
-  "description": "Immutable SHA-256 hash-chained JSON event log on PostgreSQL. Append-only audit chain with self-maintaining, never-migrated schema.",
-  "keywords": [
-    "audit",
-    "audit-log",
-    "hash-chain",
-    "immutable",
-    "append-only",
-    "postgresql",
-    "postgres",
-    "event-log",
-    "tamper-evident"
-  ],
-  "author": "tri@iki.fi",
-  "license": "MIT",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "files": [
-    "dist",
-    "sql",
-    "README.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "scripts": {
-    "embed-sql": "node scripts/embed-sql.mjs",
-    "prebuild": "npm run embed-sql",
-    "build": "tsc -p tsconfig.json",
-    "pretest": "npm run embed-sql",
-    "test": "vitest run",
-    "prepack": "npm run build"
-  },
-  "peerDependencies": {
-    "pg": ">=8"
-  },
-  "devDependencies": {
-    "@types/node": "^20.0.0",
-    "@types/pg": "^8.10.0",
-    "pg": "^8.11.0",
-    "typescript": "^5.4.0",
-    "vitest": "^3.0.0"
-  }
+    "name": "tr-json-chain",
+    "version": "0.1.0",
+    "description": "Immutable SHA-256 hash-chained JSON event log on PostgreSQL. Append-only audit chain with self-maintaining, never-migrated schema.",
+    "keywords": [
+        "audit",
+        "audit-log",
+        "hash-chain",
+        "immutable",
+        "append-only",
+        "postgresql",
+        "postgres",
+        "event-log",
+        "tamper-evident"
+    ],
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "files": [
+        "dist",
+        "sql",
+        "README.md",
+        "LICENSE"
+    ],
+    "engines": {
+        "node": ">=18"
+    },
+    "scripts": {
+        "embed-sql": "node scripts/embed-sql.mjs",
+        "prebuild": "npm run embed-sql",
+        "build": "tsc -p tsconfig.json",
+        "pretest": "npm run embed-sql",
+        "test": "vitest run",
+        "prepack": "npm run build"
+    },
+    "peerDependencies": {
+        "pg": ">=8"
+    },
+    "devDependencies": {
+        "@types/node": "^20.0.0",
+        "@types/pg": "^8.10.0",
+        "pg": "^8.11.0",
+        "typescript": "^5.4.0",
+        "vitest": "^3.0.0"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/rinne/node-tr-json-chain.git"
+    },
+    "author": {
+        "name": "Timo J. Rinne",
+        "email": "tri@iki.fi",
+        "url": "https://github.com/rinne/"
+    },
+    "license": "MIT",
+    "bugs": {
+        "url": "https://github.com/rinne/node-tr-json-chain/issues"
+    },
+    "homepage": "https://github.com/rinne/node-tr-json-chain#readme"
 }
