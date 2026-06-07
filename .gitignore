@@ -1,0 +1,8 @@
+*~
+\#*\#
+/node_modules
+/package-lock.json
+/CLAUDE.md
+/dist
+/src/generated
+*.tgz
