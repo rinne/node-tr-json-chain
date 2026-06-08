@@ -449,3 +449,56 @@ describe('namespaces', () => {
     expect(() => new EventChainLogger(pool, { namespace: 'a'.repeat(39) })).not.toThrow();
   });
 });
+
+describe('external hash compatibility (portability contract)', () => {
+  // Guards the README "Hash specification": an independent SHA-256 over the
+  // exported canonical text (hashed_data) must reproduce the DB's data_hash,
+  // and SHA-256(parent_id || data_hash) must reproduce the DB's event_id —
+  // proving the chain is verifiable in any language without re-rendering JSON.
+  it('independent SHA-256 reproduces the DB data_hash and event_id', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'ext_hash' });
+    // Keys deliberately out of canonical order; jsonb reorders them.
+    await log.recordEvent({ bb: 1, a: 2, dup: 9 });
+    const { events } = await log.getEvents(-1, {
+      includeHashedData: true,
+      includeDataHash: true,
+      includeParentId: true,
+    });
+    const ev = events[0];
+    // jsonb canonical rendering: keys by length then bytewise, single spaces.
+    expect(ev.hashed_data).toBe('{"a": 2, "bb": 1, "dup": 9}');
+    // data_hash = SHA256(UTF-8 of the canonical text).
+    expect(sha256(Buffer.from(ev.hashed_data!, 'utf8')).toString('hex')).toBe(ev.data_hash);
+    // event_id = SHA256(parent_id || data_hash) over the raw 32-byte values.
+    expect(
+      sha256(Buffer.from(ev.parent_id!, 'hex'), Buffer.from(ev.data_hash!, 'hex')).toString('hex'),
+    ).toBe(ev.event_id);
+  });
+
+  it('holds across tricky payloads and the whole chain', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'ext_hash_tricky' });
+    await log.recordEvent({ s: 'ä€漢 "q" \\b', emoji: '🎉' });
+    await log.recordEvent({ nested: { deep: [1, 2.5, null, true, { x: [] }] } });
+    await log.recordEvent({ z: 1, a: 2, m: 3 });
+    const { events } = await log.getEvents({
+      includeHashedData: true,
+      includeDataHash: true,
+      includeParentId: true,
+    });
+    let prev: string | undefined;
+    for (const ev of events) {
+      if (ev.hashed_data !== undefined) {
+        // independent data_hash matches, and the canonical text decodes to data
+        expect(sha256(Buffer.from(ev.hashed_data, 'utf8')).toString('hex')).toBe(ev.data_hash);
+        expect(JSON.parse(ev.hashed_data)).toEqual(ev.data);
+      }
+      if (ev.parent_id !== undefined) {
+        expect(ev.parent_id).toBe(prev); // chain link
+        expect(
+          sha256(Buffer.from(ev.parent_id, 'hex'), Buffer.from(ev.data_hash!, 'hex')).toString('hex'),
+        ).toBe(ev.event_id);
+      }
+      prev = ev.event_id;
+    }
+  });
+});
