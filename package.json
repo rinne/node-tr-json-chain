@@ -1,6 +1,6 @@
 {
     "name": "tr-json-chain",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Immutable SHA-256 hash-chained JSON event log on PostgreSQL. Append-only audit chain with self-maintaining, never-migrated schema.",
     "keywords": [
         "audit",

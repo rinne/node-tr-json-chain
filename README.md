@@ -292,9 +292,92 @@ and extended by another.
   back compatibility reaches — e.g. at `2.0.0`, *"chains are fully backward
   compatible down to 1.0.0."*
 
-## Verifying a chain independently
+## Hash specification (for independent verifiers)
 
-Anyone with read access can re-verify the chain without this module:
+The chain is designed so that, given an export, **anyone can write an integrity
+checker in any language in well under an hour** — no PostgreSQL, no JSON
+library, no knowledge of this module required. It uses only **SHA-256**; every
+`event_id`, `parent_id`, and `data_hash` is a 32-byte value (64 lowercase hex
+characters in an export). Two rules define the entire chain:
+
+```
+data_hash = SHA256( canonical_payload_bytes )
+event_id  = SHA256( parent_id ‖ data_hash )      // SHA-256 of the 64-byte concatenation
+```
+
+with three fixed conventions:
+
+1. **Genesis** (the first event, `id 0`): `data_hash` and `event_id` are both
+   **32 zero bytes**, and it has no parent. These are constants — *not* the hash
+   of anything.
+2. **Empty / payload-less events** (the checkpoint events `event_head()` may
+   append, or any event recorded with payload storage off): an empty checkpoint
+   event's `data_hash` is **32 zero bytes** (it is *not* `SHA256("")`). With no
+   payload, a verifier cannot recompute such an event's `data_hash`; it trusts
+   the stored value when checking `event_id`.
+3. **`parent_id`** of every non-genesis event equals the previous event's
+   `event_id`.
+
+### The one compatibility-critical detail: canonical payload bytes
+
+`canonical_payload_bytes` are the **UTF-8 bytes of PostgreSQL's `jsonb` text
+rendering** of the payload — *not* your original JSON string. That rendering
+sorts object keys (by length, then bytewise), puts exactly one space after each
+`:` and `,`, drops duplicate keys (last wins), and normalizes numbers and
+string escapes.
+
+**You should not reproduce that rendering yourself.** Instead, an export carries
+the canonical text **verbatim** (the `hashed_data` field, i.e. `jsonb::text`),
+and a verifier **hashes those exact bytes** — it never parses or re-serializes
+JSON, so it needs zero knowledge of `jsonb` normalization. This is the whole
+trick that keeps independent verification trivial and stable.
+
+> ⚠ Only event *creation* (or re-deriving a payload's hash from a parsed object)
+> depends on matching PostgreSQL's normalization. *Verification from an export
+> that includes `hashed_data`* does not — never hash your own re-serialization.
+
+### Reference export (one self-describing record per event)
+
+`getEvents(0, { includeParentId: true, includeDataHash: true, includeHashedData: true })`
+(paged via `have_more`) yields exactly what a portable verifier needs — e.g. as
+NDJSON, in ascending `id` order:
+
+```json
+{"event_id":"0000…0000","data_hash":"0000…0000"}
+{"event_id":"4fcb…bd44","parent_id":"0000…0000","data_hash":"f9d8…1310","hashed_data":"{\"ts\": \"2026-06-08T…Z\", \"chain\": \"8a2af…d769f\"}"}
+{"event_id":"2e9f…d243","parent_id":"4fcb…bd44","data_hash":"6929…cc1b","hashed_data":"{\"a\": 1}"}
+```
+
+(`parent_id` is absent for genesis; `hashed_data` is absent for payload-less
+events.)
+
+### Verification algorithm (language-agnostic)
+
+```
+prev := none
+i    := 0
+for each event e, in ascending id order starting at 0:
+    if i == 0:                                    # genesis
+        require e.event_id  == 32 zero bytes
+        require e.data_hash == 32 zero bytes
+        require e has no parent_id
+    else:
+        require e.parent_id == prev               # chain link
+        if e has hashed_data:                      # payload present
+            require SHA256(utf8(e.hashed_data)) == e.data_hash
+        require SHA256(e.parent_id ++ e.data_hash) == e.event_id
+    prev := e.event_id
+    i    := i + 1
+```
+
+That is the entire checker: SHA-256 over byte strings you are handed — no JSON
+library, no PostgreSQL, any language.
+
+## Verifying a chain independently (with live DB access)
+
+If you have a connection rather than an export, the same checks run directly
+against the tables — here PostgreSQL renders the canonical payload text for you
+via `d::text`:
 
 ```js
 const { createHash } = require('node:crypto');
