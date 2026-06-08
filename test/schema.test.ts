@@ -143,27 +143,27 @@ describe('init', () => {
 describe('structural chain integrity', () => {
   it('rejects a second genesis row', async () => {
     const log = new EventChainLogger(pool, { namespace: 'guard_genesis' });
-    await log.init();
+    await log.init(); // genesis id 0, root id 1
     await expect(
       pool.query(
-        `INSERT INTO guard_genesis_event_chain (parent_id, data_hash, event_id)
-         VALUES (NULL, $1, $2)`,
+        `INSERT INTO guard_genesis_event_chain (id, parent_id, data_hash, event_id)
+         VALUES (2, NULL, $1, $2)`,
         [ZERO, Buffer.from('11'.repeat(32), 'hex')],
       ),
-    ).rejects.toMatchObject({ code: '23505' }); // unique_violation
+    ).rejects.toMatchObject({ code: '23505' }); // unique_violation (one_genesis)
   });
 
   it('rejects forks (duplicate parent_id)', async () => {
     const log = new EventChainLogger(pool, { namespace: 'guard_fork' });
-    const id = await log.recordEvent({ a: 1 });
+    const id = await log.recordEvent({ a: 1 }); // genesis 0, root 1, event 2
     const { rows } = await pool.query(
       'SELECT parent_id FROM guard_fork_event_chain WHERE event_id = $1',
       [id],
     );
     await expect(
       pool.query(
-        `INSERT INTO guard_fork_event_chain (parent_id, data_hash, event_id)
-         VALUES ($1, $2, $3)`,
+        `INSERT INTO guard_fork_event_chain (id, parent_id, data_hash, event_id)
+         VALUES (3, $1, $2, $3)`,
         [rows[0].parent_id, ZERO, Buffer.from('22'.repeat(32), 'hex')],
       ),
     ).rejects.toMatchObject({ code: '23505' });
@@ -171,14 +171,26 @@ describe('structural chain integrity', () => {
 
   it('rejects orphan parents (FK to event_chain.event_id)', async () => {
     const log = new EventChainLogger(pool, { namespace: 'guard_orphan' });
-    await log.init();
+    await log.init(); // genesis 0, root 1
     await expect(
       pool.query(
-        `INSERT INTO guard_orphan_event_chain (parent_id, data_hash, event_id)
-         VALUES ($1, $2, $3)`,
+        `INSERT INTO guard_orphan_event_chain (id, parent_id, data_hash, event_id)
+         VALUES (2, $1, $2, $3)`,
         [Buffer.from('33'.repeat(32), 'hex'), ZERO, Buffer.from('44'.repeat(32), 'hex')],
       ),
     ).rejects.toMatchObject({ code: '23503' }); // foreign_key_violation
+  });
+
+  it('assigns dense, gap-free ids starting at genesis 0', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'dense_ids' });
+    await log.init(); // genesis 0, root 1
+    await log.recordEvent({ n: 1 }); // 2
+    await log.recordEvent({ n: 2 }); // 3
+    await log.getChainHead(); // appends an empty checkpoint -> 4
+    const { rows } = await pool.query(
+      'SELECT id FROM dense_ids_event_chain ORDER BY id',
+    );
+    expect(rows.map((r) => Number(r.id))).toEqual([0, 1, 2, 3, 4]);
   });
 
   it('rejects payloads for unknown events (FK)', async () => {

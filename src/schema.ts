@@ -165,20 +165,33 @@ async function verifyTableShapes(client: PoolClient, prefix: string): Promise<vo
   }
 }
 
-/** Verifies the genesis row: exactly one root, with all-zero hashes. */
+/**
+ * Verifies the genesis row: exactly one root, at id 0, with all-zero hashes.
+ *
+ * The id 0 requirement is part of the chain's addressing contract since 0.4.0
+ * (dense, 0-based ids). Chains created by pre-0.4.0 versions used a serial id
+ * starting at 1 and are intentionally rejected here — they are not compatible.
+ */
 async function verifyGenesis(client: PoolClient, prefix: string): Promise<void> {
   const res = await client.query(
-    `SELECT data_hash, event_id FROM ${prefix}event_chain WHERE parent_id IS NULL`,
+    `SELECT id, data_hash, event_id FROM ${prefix}event_chain WHERE parent_id IS NULL`,
   );
   if (res.rowCount !== 1) {
     throw new SchemaMismatchError(
       `table "${prefix}event_chain" has ${res.rowCount} genesis rows, expected exactly 1`,
     );
   }
-  const row = res.rows[0] as { data_hash: Buffer; event_id: Buffer };
+  const row = res.rows[0] as { id: string; data_hash: Buffer; event_id: Buffer };
   if (!ZERO_HASH.equals(row.data_hash) || !ZERO_HASH.equals(row.event_id)) {
     throw new SchemaMismatchError(
       `genesis row of "${prefix}event_chain" does not have all-zero hashes`,
+    );
+  }
+  // pg returns bigint as a string.
+  if (String(row.id) !== '0') {
+    throw new SchemaMismatchError(
+      `genesis row of "${prefix}event_chain" has id ${row.id}, expected 0 ` +
+        '(chains created before 0.4.0 are not compatible)',
     );
   }
 }

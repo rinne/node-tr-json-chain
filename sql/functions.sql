@@ -29,10 +29,10 @@ BEGIN
   h := sha256(d);
 
   -- Chain handling needs the lock: finding the chain head and inserting the
-  -- new head must be atomic.
+  -- new head must be atomic. The new id is the head's id + 1 (dense, gap-free).
   LOCK TABLE {{ns}}event_chain IN EXCLUSIVE MODE;
-  INSERT INTO {{ns}}event_chain (parent_id, data_hash, event_id)
-    SELECT event_id, h, sha256(event_id || h)
+  INSERT INTO {{ns}}event_chain (id, parent_id, data_hash, event_id)
+    SELECT id + 1, event_id, h, sha256(event_id || h)
     FROM {{ns}}event_chain
     ORDER BY id DESC
     LIMIT 1
@@ -60,13 +60,14 @@ RETURNS BYTEA AS $$
 DECLARE
   z CONSTANT bytea :=
     '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea;
+  i bigint; -- id of the current head.
   h bytea; -- data_hash of the current head.
   r bytea; -- Event id to be returned.
 BEGIN
   -- Chain handling needs the lock: inspecting the head and appending the
   -- empty checkpoint event must be atomic.
   LOCK TABLE {{ns}}event_chain IN EXCLUSIVE MODE;
-  SELECT event_id, data_hash INTO r, h
+  SELECT id, event_id, data_hash INTO i, r, h
     FROM {{ns}}event_chain ORDER BY id DESC LIMIT 1;
 
   IF r IS NULL THEN
@@ -74,8 +75,8 @@ BEGIN
   END IF;
 
   IF h <> z THEN
-    INSERT INTO {{ns}}event_chain (parent_id, data_hash, event_id)
-      VALUES (r, z, sha256(r || z))
+    INSERT INTO {{ns}}event_chain (id, parent_id, data_hash, event_id)
+      VALUES (i + 1, r, z, sha256(r || z))
     RETURNING event_id INTO r;
   END IF;
 

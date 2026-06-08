@@ -50,9 +50,9 @@ data_hash = SHA256(payload rendered as JSONB text, UTF-8)
 event_id  = SHA256(parent_event_id ‖ data_hash)
 ```
 
-The chain starts from a fixed **genesis row** whose `event_id` and `data_hash`
-are 256 zero bits, immediately followed by a **root event** carrying the
-chain's random UUID identity and creation time (see
+The chain starts from a fixed **genesis row** (`id 0`) whose `event_id` and
+`data_hash` are 256 zero bits, immediately followed by a **root event** (`id 1`)
+carrying the chain's random UUID identity and creation time (see
 [`init()`](#init-promisevoid)). Altering, removing, or reordering any historical event
 changes every subsequent `event_id`, so the head id commits to the entire
 history. Publish or cross-log a head id periodically and you have an
@@ -62,8 +62,15 @@ Two tables hold the data:
 
 | table | contents |
 |---|---|
-| `event_chain` | the chain itself: `id BIGSERIAL`, `parent_id`, `data_hash`, `event_id` (BYTEA) |
+| `event_chain` | the chain itself: `id BIGINT`, `parent_id`, `data_hash`, `event_id` (BYTEA) |
 | `event_payload` | optional payload per event: `event_id` (FK), `ts TIMESTAMPTZ`, `d JSONB` |
+
+`id` is a **dense, 0-based position** in the chain (genesis is `0`, the next
+event `1`, and so on, with no gaps). It is assigned by the chain's stored
+functions — each new id is the previous head's `id + 1`, computed under the
+table's exclusive write lock — rather than by a sequence, so a rolled-back
+transaction never leaves a hole. `id` is never hashed, so this addressing has
+no bearing on chain integrity.
 
 The chain's shape is enforced *structurally* by the table itself:
 
@@ -204,15 +211,45 @@ Validation is strict because the namespace becomes part of SQL identifiers.
 
 ## The never-migrate guarantee
 
-The chain tables' DDL is **frozen**. New versions of this module may replace
-the stored functions, but will never `ALTER`, `DROP`, or otherwise migrate
+The chain tables' DDL is **frozen** (binding from `1.0.0` — see
+[Versioning and compatibility](#versioning-and-compatibility); the `0.x` series
+is still finalizing the shape). New versions of this module may replace the
+stored functions, but will never `ALTER`, `DROP`, or otherwise migrate
 `event_chain` / `event_payload`, and will never change how `event_id` or
 `data_hash` are computed. On every `init()` the module *verifies* existing
 tables and refuses to proceed on any mismatch — it has no code path that
 modifies an existing table.
 
 This is what makes the chain trustworthy long-term: a chain recorded today
-remains verifiable, byte for byte, against any future version of this module.
+remains verifiable, byte for byte, against any future version of this module
+(see the compatibility policy below for when this guarantee becomes binding).
+
+## Versioning and compatibility
+
+This project follows semantic versioning. Its compatibility promise is about
+the **on-disk chain** — whether a chain written by one version can be opened
+and extended by another.
+
+- **Chain integrity is preserved across every version.** The hashing rules
+  (`event_id` / `data_hash`) and the linked-list structure never change, so a
+  chain is always internally verifiable regardless of which version wrote it.
+- **Pre-1.0.0 (the current `0.x` series): the on-disk shape is not yet frozen.**
+  Breaking changes to the table layout may still land between `0.x` releases as
+  the design is finalized, and a newer `0.x` may refuse to open a chain created
+  by an older one. In particular:
+  - **`0.4.0` is not compatible with chains created by `0.1.0`–`0.3.0`.** The
+    `event_chain.id` column changed from a serial (starting at 1) to a
+    caller-assigned, dense, 0-based position (genesis `id 0`). `init()` rejects
+    a pre-`0.4.0` chain with a `SchemaMismatchError`. There is no in-place
+    migration; integrity of the old chain is unaffected, but you must start a
+    new chain (or namespace) to use `0.4.0+`.
+- **From 1.0.0 onward, backward compatibility is guaranteed and stated
+  explicitly.** Once `1.0.0` ships, the on-disk shape is frozen (this is when
+  the [never-migrate guarantee](#the-never-migrate-guarantee) becomes binding),
+  and every later release will be able to open any chain back to `1.0.0`. When
+  a future major version changes something, the README will say exactly how far
+  back compatibility reaches — e.g. at `2.0.0`, *"chains are fully backward
+  compatible down to 1.0.0."*
 
 ## Verifying a chain independently
 
