@@ -163,6 +163,20 @@ up empty events.
 This makes a head fetch itself an auditable act: the returned id commits to
 everything recorded before it.
 
+### `getRootEvent(): Promise<{ event_id, event_data? }>`
+
+Resolves to the chain's **root event** — the first event after genesis, which
+carries the chain's identity:
+
+```js
+{ event_id: <Buffer>, event_data: { chain: '…', ts: '…' /* … */ } }
+```
+
+`event_data` (the stored JSONB payload) is **omitted** when no payload was kept
+for the root event. Unlike the other accessors this does **not** initialize the
+chain: it reads existing state and throws an `Error` if the chain is
+uninitialized (tables absent, or no root event recorded yet).
+
 ### Errors
 
 | class | thrown when |

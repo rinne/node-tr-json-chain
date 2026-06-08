@@ -180,6 +180,34 @@ describe('root event options', () => {
   });
 });
 
+describe('getRootEvent', () => {
+  it('returns the root event id and payload', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'root_get' });
+    await log.init();
+    const root = await getRoot(pool, 'root_get');
+    const got = await log.getRootEvent();
+    expect(got.event_id).toBeInstanceOf(Buffer);
+    expect(got.event_id.equals(root.event_id)).toBe(true);
+    expect(got.event_data).toEqual(root.d);
+    expect(typeof (got.event_data as { chain: string }).chain).toBe('string');
+  });
+
+  it('reflects rootExtraData / rootOmitDefaultData', async () => {
+    const log = new EventChainLogger(pool, {
+      namespace: 'root_get_omit',
+      rootOmitDefaultData: true,
+      rootExtraData: { only: 'this' },
+    });
+    await log.init();
+    expect((await log.getRootEvent()).event_data).toEqual({ only: 'this' });
+  });
+
+  it('throws when the chain is uninitialized', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'root_get_uninit' });
+    await expect(log.getRootEvent()).rejects.toThrow(/not initialized/);
+  });
+});
+
 describe('getChainHead', () => {
   it('checkpoints over the root event on a freshly initialized chain', async () => {
     const log = new EventChainLogger(pool, { namespace: 'head_virgin' });

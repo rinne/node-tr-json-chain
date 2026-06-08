@@ -1,6 +1,17 @@
 import type { Pool } from 'pg';
 import { ensureSchema, namespacePrefix, type RootEventOptions } from './schema';
 
+// The genesis row's event_id (32 zero bytes); the root event is the unique
+// row whose parent_id points at it.
+const ZERO_HASH = Buffer.alloc(32);
+
+/** A chain event id together with its payload, if the payload was stored. */
+export interface ChainEvent {
+  event_id: Buffer;
+  /** The stored JSONB payload; omitted entirely if no payload was kept. */
+  event_data?: unknown;
+}
+
 export interface EventChainLoggerOptions {
   /**
    * Optional chain namespace, allowing multiple independent chains in the
@@ -123,6 +134,41 @@ export class EventChainLogger {
    */
   async timestamp(): Promise<Buffer> {
     return this.recordEvent({ ts: new Date().toISOString() });
+  }
+
+  /**
+   * Returns the chain's root event — the first event after genesis, carrying
+   * the chain's identity. Resolves to `{ event_id }`, plus `event_data` (the
+   * stored JSONB payload) when the payload was kept.
+   *
+   * Unlike the other accessors this does NOT initialize the chain: it reads
+   * the existing state and throws an Error if the chain is uninitialized
+   * (tables absent, or no root event recorded yet).
+   */
+  async getRootEvent(): Promise<ChainEvent> {
+    let res;
+    try {
+      res = await this.#pool.query(
+        `SELECT c.event_id, p.d AS event_data
+           FROM ${this.#prefix}event_chain c
+           LEFT JOIN ${this.#prefix}event_payload p ON p.event_id = c.event_id
+          WHERE c.parent_id = $1`,
+        [ZERO_HASH],
+      );
+    } catch (err) {
+      // undefined_table — the chain tables don't exist yet.
+      if ((err as { code?: string }).code === '42P01') {
+        throw new Error('chain is not initialized (tables do not exist)');
+      }
+      throw err;
+    }
+    if (res.rowCount === 0) {
+      throw new Error('chain is not initialized (no root event)');
+    }
+    const row = res.rows[0] as { event_id: Buffer; event_data: unknown };
+    const event: ChainEvent = { event_id: row.event_id };
+    if (row.event_data !== null) event.event_data = row.event_data;
+    return event;
   }
 
   /**
