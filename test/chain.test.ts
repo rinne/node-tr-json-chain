@@ -188,8 +188,8 @@ describe('getRootEvent', () => {
     const got = await log.getRootEvent();
     expect(got.event_id).toBeInstanceOf(Buffer);
     expect(got.event_id.equals(root.event_id)).toBe(true);
-    expect(got.event_data).toEqual(root.d);
-    expect(typeof (got.event_data as { chain: string }).chain).toBe('string');
+    expect(got.data).toEqual(root.d);
+    expect(typeof (got.data as { chain: string }).chain).toBe('string');
   });
 
   it('reflects rootExtraData / rootOmitDefaultData', async () => {
@@ -199,12 +199,184 @@ describe('getRootEvent', () => {
       rootExtraData: { only: 'this' },
     });
     await log.init();
-    expect((await log.getRootEvent()).event_data).toEqual({ only: 'this' });
+    expect((await log.getRootEvent()).data).toEqual({ only: 'this' });
   });
 
   it('throws when the chain is uninitialized', async () => {
     const log = new EventChainLogger(pool, { namespace: 'root_get_uninit' });
     await expect(log.getRootEvent()).rejects.toThrow(/not initialized/);
+  });
+});
+
+describe('getEvents', () => {
+  const ZERO_HEX = '00'.repeat(32);
+
+  // Builds a chain with `n` recorded events on top of genesis(0) + root(1),
+  // so ids run 0..(n+1), len = n + 2.
+  async function seed(ns: string, n: number) {
+    const log = new EventChainLogger(pool, { namespace: ns });
+    await log.init();
+    for (let i = 0; i < n; i++) await log.recordEvent({ n: i });
+    return log;
+  }
+
+  it('returns all events (genesis at index 0) by default', async () => {
+    const log = await seed('ev_all', 3); // ids 0..4, len 5
+    const r = await log.getEvents();
+    expect(r.events.length).toBe(5);
+    expect(r.start).toBe(0);
+    expect(r.end).toBe(4);
+    expect(r.have_more).toBe(false);
+    // index 0 = genesis: all-zero id, no payload
+    expect(r.events[0].event_id).toBe(ZERO_HEX);
+    expect(r.events[0].data).toBeUndefined();
+    expect(r.events[0]).not.toHaveProperty('data');
+    // index 1 = root event: has chain UUID + ts
+    expect(typeof (r.events[1].data as { chain: string }).chain).toBe('string');
+    // event_id is 64-char hex
+    expect(r.events[2].event_id).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('honors a positive start (slice from index)', async () => {
+    const log = await seed('ev_start', 3); // len 5
+    const r = await log.getEvents(2);
+    expect(r.events.length).toBe(3); // ids 2,3,4
+    expect([r.start, r.end]).toEqual([2, 4]);
+    expect(r.have_more).toBe(false);
+  });
+
+  it('honors start and (exclusive) end', async () => {
+    const log = await seed('ev_range', 5); // ids 0..6, len 7
+    const r = await log.getEvents(2, 4); // ids 2,3
+    expect([r.start, r.end]).toEqual([2, 3]);
+    expect(r.events.length).toBe(2);
+  });
+
+  it('supports negative start (last N)', async () => {
+    const log = await seed('ev_neg', 5); // ids 0..6, len 7
+    const r = await log.getEvents(-2); // ids 5,6
+    expect([r.start, r.end]).toEqual([5, 6]);
+    expect(r.events.length).toBe(2);
+  });
+
+  it('supports a negative end (omit the last)', async () => {
+    const log = await seed('ev_negend', 5); // ids 0..6, len 7
+    const r = await log.getEvents(2, -1); // ids 2..5
+    expect([r.start, r.end]).toEqual([2, 5]);
+  });
+
+  it('returns an empty page for a collapsed range', async () => {
+    const log = await seed('ev_empty', 3); // len 5
+    const r = await log.getEvents(2, 2);
+    expect(r.events).toEqual([]);
+    expect(r.have_more).toBe(false);
+    expect([r.start, r.end]).toEqual([2, 1]); // end = start - 1
+  });
+
+  it('includes optional fields on request', async () => {
+    const log = await seed('ev_opts', 2); // ids 0..3
+    const r = await log.getEvents(1, 2, {
+      includeHashedData: true,
+      includeDataHash: true,
+      includeParentId: true,
+    });
+    const root = r.events[0];
+    expect(root.parent_id).toBe(ZERO_HEX); // root's parent is genesis
+    expect(root.data_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(typeof root.hashed_data).toBe('string');
+    expect(JSON.parse(root.hashed_data as string)).toEqual(root.data);
+  });
+
+  it('omits parent_id/data/hashed_data appropriately for genesis', async () => {
+    const log = await seed('ev_genesis', 1);
+    const r = await log.getEvents(0, 1, {
+      includeParentId: true,
+      includeDataHash: true,
+      includeHashedData: true,
+    });
+    const genesis = r.events[0];
+    expect(genesis).not.toHaveProperty('parent_id'); // null parent
+    expect(genesis).not.toHaveProperty('data'); // no payload
+    expect(genesis).not.toHaveProperty('hashed_data'); // no payload
+    expect(genesis.data_hash).toBe(ZERO_HEX); // present, all-zero
+  });
+
+  it('accepts options as the sole / second argument', async () => {
+    const log = await seed('ev_optarg', 2);
+    const all = await log.getEvents({ includeDataHash: true });
+    expect(all.start).toBe(0);
+    expect(all.events.every((e) => typeof e.data_hash === 'string')).toBe(true);
+    const fromOne = await log.getEvents(1, { includeDataHash: true });
+    expect(fromOne.start).toBe(1);
+  });
+
+  it('caps at 1000 events and paginates with have_more', async () => {
+    const ns = 'ev_big';
+    const log = new EventChainLogger(pool, { namespace: ns });
+    await log.init();
+    // Populate 1001 events server-side: genesis(0) + root(1) + 1001 => ids 0..1002
+    await pool.query(
+      `DO $$ BEGIN
+         FOR i IN 1..1001 LOOP
+           PERFORM ${ns}_event_record(jsonb_build_object('n', i));
+         END LOOP;
+       END $$;`,
+    );
+    const page1 = await log.getEvents(); // len 1003
+    expect(page1.events.length).toBe(1000);
+    expect([page1.start, page1.end]).toEqual([0, 999]);
+    expect(page1.have_more).toBe(true);
+    const page2 = await log.getEvents(page1.end + 1);
+    expect([page2.start, page2.end]).toEqual([1000, 1002]);
+    expect(page2.events.length).toBe(3);
+    expect(page2.have_more).toBe(false);
+  });
+
+  it('honors options.maxEvents and continues via end + 1', async () => {
+    const log = await seed('ev_max', 6); // ids 0..7, len 8
+    const p1 = await log.getEvents(0, { maxEvents: 3 });
+    expect(p1.events.length).toBe(3);
+    expect([p1.start, p1.end]).toEqual([0, 2]);
+    expect(p1.have_more).toBe(true);
+    const p2 = await log.getEvents(p1.end + 1, { maxEvents: 3 });
+    expect([p2.start, p2.end]).toEqual([3, 5]);
+    expect(p2.have_more).toBe(true);
+  });
+
+  it('traverses the whole chain with the documented loop', async () => {
+    const log = await seed('ev_loop', 10); // ids 0..11, len 12
+    const seen: string[] = [];
+    for (let x = await log.getEvents(0, { maxEvents: 4 }); ; x = await log.getEvents(x.end + 1, { maxEvents: 4 })) {
+      for (const ev of x.events) seen.push(ev.event_id);
+      if (!x.have_more) break;
+    }
+    expect(seen.length).toBe(12); // every row exactly once, no gaps/dupes
+    expect(new Set(seen).size).toBe(12);
+  });
+
+  it('ignores maxEvents above the 1000 cap', async () => {
+    const log = await seed('ev_maxbig', 2); // len 4
+    const r = await log.getEvents(0, { maxEvents: 5000 });
+    expect(r.events.length).toBe(4); // all, cap not exceeded
+    expect(r.have_more).toBe(false);
+  });
+
+  it('throws TypeError on an invalid maxEvents', async () => {
+    const log = await seed('ev_maxbad', 1);
+    await expect(log.getEvents(0, { maxEvents: 0 })).rejects.toThrow(TypeError);
+    await expect(log.getEvents(0, { maxEvents: -3 })).rejects.toThrow(TypeError);
+    await expect(log.getEvents(0, { maxEvents: 2.5 })).rejects.toThrow(TypeError);
+  });
+
+  it('throws TypeError on a non-integer index', async () => {
+    const log = await seed('ev_bad', 1);
+    await expect(log.getEvents(1.5)).rejects.toThrow(TypeError);
+    await expect(log.getEvents(0, 'x' as unknown as number)).rejects.toThrow(TypeError);
+  });
+
+  it('throws when the chain is uninitialized', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'ev_uninit' });
+    await expect(log.getEvents()).rejects.toThrow(/not initialized/);
   });
 });
 

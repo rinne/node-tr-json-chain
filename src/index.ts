@@ -3,6 +3,9 @@ export {
   type EventChainLoggerOptions,
   type RecordEventOptions,
   type ChainEvent,
+  type GetEventsOptions,
+  type GetEventsResult,
+  type ChainEventDetail,
 } from './event-chain-logger';
 export {
   ChainVerificationError,

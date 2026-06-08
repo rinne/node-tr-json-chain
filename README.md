@@ -170,19 +170,60 @@ up empty events.
 This makes a head fetch itself an auditable act: the returned id commits to
 everything recorded before it.
 
-### `getRootEvent(): Promise<{ event_id, event_data? }>`
+### `getRootEvent(): Promise<{ event_id, data? }>`
 
 Resolves to the chain's **root event** — the first event after genesis, which
 carries the chain's identity:
 
 ```js
-{ event_id: <Buffer>, event_data: { chain: '…', ts: '…' /* … */ } }
+{ event_id: <Buffer>, data: { chain: '…', ts: '…' /* … */ } }
 ```
 
-`event_data` (the stored JSONB payload) is **omitted** when no payload was kept
-for the root event. Unlike the other accessors this does **not** initialize the
+`data` (the stored JSONB payload) is **omitted** when no payload was kept for
+the root event. Unlike the other accessors this does **not** initialize the
 chain: it reads existing state and throws an `Error` if the chain is
 uninitialized (tables absent, or no root event recorded yet).
+
+### `getEvents(start?, end?, options?): Promise<{ events, start, end, have_more }>`
+
+Returns a page of events addressed by `Array.prototype.slice` semantics, where
+**the index equals the event's `id`** (genesis is `0`, the root event `1`, …).
+`getEvents()` / `getEvents(0)` mean "all events".
+
+```js
+const { events, start, end, have_more } = await log.getEvents(0, 100);
+// events: [ { event_id: '<hex>', data?: {…} }, … ]
+// start/end: index (= id) of the first/last returned event
+// have_more: true if the requested range holds more than was returned
+```
+
+- `start` / `end` follow `slice`: negatives count from the end (`getEvents(-5)`
+  = last five), `end` is exclusive (`getEvents(5, 10)` = indices 5–9), an
+  omitted or `null` `end` means "to the end" (`getEvents(5, -1)` drops only the
+  last). Non-integer indices throw `TypeError`.
+- **At most 1000 events per call** (or `options.maxEvents`, if smaller — it must
+  be a positive integer, and values above 1000 are ignored). If the requested
+  range is larger, that many are returned with `have_more: true`; continue from
+  `result.end + 1`. An empty range yields `events: []`, `have_more: false`, and
+  `end = start - 1`.
+
+  ```js
+  for (let x = await ec.getEvents(0); ; x = await ec.getEvents(x.end + 1)) {
+    for (const ev of x.events) { /* … */ }
+    if (!x.have_more) break;
+  }
+  ```
+- Each event is `{ event_id: '<hex>' }` plus `data` (the JSONB payload) when one
+  was stored — so the genesis row and empty checkpoint events have no `data`.
+- `options` (always the last argument; also valid as the sole or second
+  argument) adds per-event fields, all hex/string and all default `false`:
+  - `includeParentId` → `parent_id` (omitted for genesis, which has none);
+  - `includeDataHash` → `data_hash` (always available);
+  - `includeHashedData` → `hashed_data`, the `jsonb::text` whose UTF-8 bytes
+    were hashed into `data_hash` (omitted when no payload was stored);
+  - `maxEvents` → a smaller per-call cap (positive integer; `> 1000` ignored).
+- Like `getRootEvent`, this does **not** initialize the chain; it throws if the
+  chain is uninitialized.
 
 ### Errors
 
