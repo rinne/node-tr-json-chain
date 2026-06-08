@@ -281,11 +281,67 @@ async function verifyRootEvent(client: PoolClient, prefix: string): Promise<void
 }
 
 /**
+ * Full-chain canary: re-hashes and re-links *every* event server-side in one
+ * statement, instead of only the root event (see {@link verifyRootEvent}).
+ *
+ * For each row it checks, exactly as the recorder computes them:
+ *   - data_hash = sha256(convert_to(d::text, 'UTF8'))  — only where a payload
+ *     is stored (events without a payload keep a data_hash we can't recompute,
+ *     so they are skipped here but still bound by the event_id check);
+ *   - event_id  = sha256(parent_id || data_hash), since parent_id already *is*
+ *     the parent's event_id (FK-enforced) — no self-join needed;
+ *   - the genesis row (parent_id IS NULL) has all-zero event_id and data_hash.
+ *
+ * The query returns only offending rows; an empty result means the whole chain
+ * verifies. Stronger but heavier than the root-only canary — opt in via the
+ * `verifyChain` option when you want every init to re-prove the entire chain.
+ */
+async function verifyFullChain(client: PoolClient, prefix: string): Promise<void> {
+  const res = await client.query(
+    `SELECT v.id, v.bad_data_hash, v.bad_event_id
+       FROM (
+         SELECT e.id,
+                (p.d IS NOT NULL
+                   AND e.data_hash <> sha256(convert_to(p.d::text, 'UTF8'))) AS bad_data_hash,
+                (CASE
+                   WHEN e.parent_id IS NULL
+                     THEN (e.event_id <> $1 OR e.data_hash <> $1)
+                   ELSE e.event_id <> sha256(e.parent_id || e.data_hash)
+                 END) AS bad_event_id
+           FROM ${prefix}event_chain e
+           LEFT JOIN ${prefix}event_payload p ON p.event_id = e.event_id
+       ) v
+      WHERE v.bad_data_hash OR v.bad_event_id
+      ORDER BY v.id
+      LIMIT 5`,
+    [ZERO_HASH],
+  );
+  if (res.rows.length === 0) return; // whole chain verifies
+  const detail = res.rows
+    .map((r) => {
+      const reasons = [];
+      if (r.bad_data_hash) reasons.push('data_hash');
+      if (r.bad_event_id) reasons.push('event_id');
+      return `id ${r.id} (${reasons.join('+')})`;
+    })
+    .join(', ');
+  throw new ChainVerificationError(
+    `chain verification failed for "${prefix}event_chain" at ${detail}` +
+      (res.rows.length === 5 ? ' (and possibly more)' : '') +
+      ': either the chain was tampered with, or this PostgreSQL server hashes ' +
+      'JSONB incompatibly with the one that recorded the chain',
+  );
+}
+
+/**
  * Idempotently ensures the chain schema for the given namespace prefix:
  * sha256() support, tables (create-if-absent + shape verification of
  * pre-existing ones), genesis row, stored functions (CREATE OR REPLACE),
  * and the chain's root event (recorded only into an empty chain; its
  * content is shaped by rootEventOptions).
+ *
+ * The final canary re-verifies hashes server-side: the root event only by
+ * default, or — when `verifyChain` is true — the entire chain.
  *
  * Runs in a single transaction serialized by a per-namespace advisory lock,
  * so concurrent initializers across processes are safe.
@@ -294,6 +350,7 @@ export async function ensureSchema(
   pool: Pool,
   prefix: string,
   rootEventOptions: RootEventOptions = {},
+  verifyChain = false,
 ): Promise<void> {
   const client = await pool.connect();
   try {
@@ -307,7 +364,11 @@ export async function ensureSchema(
     await verifyGenesis(client, prefix);
     await client.query(expand(FUNCTIONS_SQL, prefix));
     await ensureRootEvent(client, prefix, rootEventOptions);
-    await verifyRootEvent(client, prefix);
+    if (verifyChain) {
+      await verifyFullChain(client, prefix);
+    } else {
+      await verifyRootEvent(client, prefix);
+    }
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});

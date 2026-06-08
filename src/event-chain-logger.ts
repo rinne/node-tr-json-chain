@@ -86,6 +86,15 @@ export interface EventChainLoggerOptions {
    * Has no effect on an already-initialized chain. Default: false.
    */
   rootOmitDefaultData?: boolean;
+
+  /**
+   * When true, every `init()` re-verifies the *entire* chain server-side
+   * (re-hashing and re-linking all events) instead of only the root event.
+   * Throws `ChainVerificationError` on any mismatch. Stronger but heavier —
+   * cost scales with chain length, so enable it where that trade-off is worth
+   * it (e.g. on trusted-startup integrity checks). Default: false.
+   */
+  verifyChain?: boolean;
 }
 
 export interface RecordEventOptions {
@@ -108,6 +117,7 @@ export class EventChainLogger {
   readonly #pool: Pool;
   readonly #prefix: string;
   readonly #rootEventOptions: RootEventOptions;
+  readonly #verifyChain: boolean;
   #initPromise: Promise<void> | undefined;
 
   constructor(pool: Pool, options: EventChainLoggerOptions = {}) {
@@ -124,6 +134,7 @@ export class EventChainLogger {
       );
     }
     this.#rootEventOptions = { rootExtraData, rootOmitDefaultData };
+    this.#verifyChain = options.verifyChain === true;
   }
 
   /**
@@ -133,9 +144,10 @@ export class EventChainLogger {
    * genesis row, stored functions, and — if the chain is empty — the chain's
    * root event (by default { "chain": "<random-uuid>", "ts": "<ISO 8601 UTC>" },
    * shaped by the rootExtraData / rootOmitDefaultData constructor options).
-   * Finally the root event is re-verified server-side (canary; throws
-   * ChainVerificationError), proving on every connect that this server
-   * hashes the stored JSONB compatibly with the one that recorded it.
+   * Finally a server-side canary re-verifies hashes (throws
+   * ChainVerificationError), proving on every connect that this server hashes
+   * the stored JSONB compatibly with the one that recorded it — the root event
+   * only by default, or the entire chain when the `verifyChain` option is set.
    *
    * Idempotent and safe under concurrent startup of multiple processes
    * (serialized by a per-namespace advisory lock). Called lazily by
@@ -147,6 +159,7 @@ export class EventChainLogger {
         this.#pool,
         this.#prefix,
         this.#rootEventOptions,
+        this.#verifyChain,
       ).catch((err) => {
         this.#initPromise = undefined; // allow retry after a failed init
         throw err;

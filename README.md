@@ -100,6 +100,11 @@ linked list.
   and `ts` properties from the root event; with no `rootExtraData` the root
   event becomes simply `{}`. Default `false`. Also ignored on an
   already-initialized chain.
+- `options.verifyChain` — when `true`, every `init()` re-verifies the **entire
+  chain** server-side (re-hashing and re-linking every event in one SQL
+  statement) instead of only the root event, throwing `ChainVerificationError`
+  on any mismatch. Stronger but heavier — the cost scales with chain length.
+  Default `false`. See [the canary check](#what-about-postgresql-upgrades).
 
 The constructor throws `TypeError` synchronously on an invalid namespace or a
 non-object `rootExtraData`.
@@ -422,6 +427,12 @@ incompatibly — or the root event was tampered with — connecting fails loudly
 with `ChainVerificationError` instead of the chain silently becoming
 unverifiable.
 
+For a stronger guarantee, the `verifyChain: true` constructor option escalates
+this canary from the root event to the **whole chain**: a single SQL statement
+re-derives `data_hash` (where a payload is stored) and `event_id` for every row
+and re-checks every link, raising `ChainVerificationError` on the first
+mismatch. It scales with chain length, so it's opt-in rather than the default.
+
 ### ⚠ JSONB normalization
 
 PostgreSQL normalizes JSONB before it is hashed: object keys are reordered
@@ -442,16 +453,6 @@ as in the snippet above — or round-trip your copy through `::jsonb::text`.
   own namespaces.
 - **The SQL sources** ship in the package under `sql/` for review; the same
   text is embedded in the compiled module and is what `init()` executes.
-
-## Roadmap
-
-Possible future additions — all strictly additive (the chain tables are
-frozen and will never change):
-
-- `getEvent(eventId)` — fetch a single event's payload and timestamp;
-- an async-iterator chain walker;
-- `verifyChain()` — full chain re-verification in JS with Node `crypto`
-  (until then, see the snippet above).
 
 ## Development
 

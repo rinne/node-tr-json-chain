@@ -140,6 +140,44 @@ describe('init', () => {
   });
 });
 
+describe('verifyChain option (full server-side chain verification)', () => {
+  it('accepts a healthy chain, including checkpoint and no-payload events', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'vc_ok' });
+    await log.recordEvent({ a: 1 });
+    await log.recordEvent({ secret: true }, { storePayload: false }); // no payload row
+    await log.getChainHead(); // appends an empty checkpoint (zero data_hash)
+    // A fresh init with verifyChain re-checks the entire chain — no throw.
+    await new EventChainLogger(pool, { namespace: 'vc_ok', verifyChain: true }).init();
+  });
+
+  it('detects a tampered non-root payload that the root-only canary misses', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'vc_tamper' });
+    await log.recordEvent({ a: 1 });
+    await log.recordEvent({ b: 2 }); // a non-root event (id 3)
+    await pool.query(
+      `UPDATE vc_tamper_event_payload SET d = '{"b": 999}'
+        WHERE event_id = (SELECT event_id FROM vc_tamper_event_chain ORDER BY id DESC LIMIT 1)`,
+    );
+    // Default init (root-only canary) does NOT notice a non-root tamper:
+    await new EventChainLogger(pool, { namespace: 'vc_tamper' }).init();
+    // verifyChain does:
+    await expect(
+      new EventChainLogger(pool, { namespace: 'vc_tamper', verifyChain: true }).init(),
+    ).rejects.toThrow(ChainVerificationError);
+  });
+
+  it('detects a tampered data_hash', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'vc_dh' });
+    await log.recordEvent({ a: 1 }); // id 2
+    await pool.query('UPDATE vc_dh_event_chain SET data_hash = $1 WHERE id = 2', [
+      Buffer.from('99'.repeat(32), 'hex'),
+    ]);
+    await expect(
+      new EventChainLogger(pool, { namespace: 'vc_dh', verifyChain: true }).init(),
+    ).rejects.toThrow(ChainVerificationError);
+  });
+});
+
 describe('structural chain integrity', () => {
   it('rejects a second genesis row', async () => {
     const log = new EventChainLogger(pool, { namespace: 'guard_genesis' });
