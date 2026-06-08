@@ -218,7 +218,7 @@ export interface RootEventOptions {
  * Records the chain's root event if (and only if) the chain is empty, i.e.
  * holds nothing beyond the genesis row. By default:
  *
- *   { "chain": "<random-uuid>", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
+ *   { "type": "chain-root", "chain": "<random-uuid>", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
  *
  * The UUID gives the chain a unique identity; "ts" (ISO 8601 UTC) is also
  * the conventional timestamp property for subsequent events. The defaults
@@ -234,7 +234,7 @@ async function ensureRootEvent(
 ): Promise<void> {
   const base: Record<string, unknown> = options.rootOmitDefaultData
     ? {}
-    : { chain: randomUUID(), ts: new Date().toISOString() };
+    : { type: 'chain-root', chain: randomUUID(), ts: new Date().toISOString() };
   const root =
     options.rootExtraData != null
       ? Object.assign(base, options.rootExtraData)

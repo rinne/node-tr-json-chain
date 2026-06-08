@@ -98,7 +98,8 @@ describe('timestamp', () => {
       'SELECT d FROM ts_basic_event_payload WHERE event_id = $1',
       [id],
     );
-    expect(Object.keys(rows[0].d)).toEqual(['ts']);
+    expect(Object.keys(rows[0].d).sort()).toEqual(['ts', 'type']);
+    expect(rows[0].d.type).toBe('ts');
     const ts = Date.parse(rows[0].d.ts);
     expect(ts).toBeGreaterThanOrEqual(before);
     expect(ts).toBeLessThanOrEqual(after);
@@ -115,7 +116,7 @@ describe('root event options', () => {
     await log.init();
     const root = await getRoot(pool, 'root_extra');
     expect(root.d.chain).toBe('kukkuu'); // overridden default
-    expect(root.d).toMatchObject({ foo: 1, bar: [1, 2, 3] });
+    expect(root.d).toMatchObject({ type: 'chain-root', foo: 1, bar: [1, 2, 3] });
     expect(typeof root.d.ts).toBe('string'); // default ts kept
     expect(await verifyChainInJs(pool, 'root_extra')).toBe(2); // genesis + root
   });

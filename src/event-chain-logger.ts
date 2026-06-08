@@ -76,14 +76,15 @@ export interface EventChainLoggerOptions {
    * object (not an array).
    *
    * Example: { chain: "kukkuu", foo: 1, bar: [1, 2, 3] } yields the root event
-   * { "chain": "kukkuu", "ts": "<ISO 8601 UTC>", "foo": 1, "bar": [1, 2, 3] }.
+   * { "type": "chain-root", "chain": "kukkuu", "ts": "<ISO 8601 UTC>",
+   *   "foo": 1, "bar": [1, 2, 3] }.
    */
   rootExtraData?: Record<string, unknown> | null;
 
   /**
-   * When true, omit the default "chain" and "ts" properties from the root
-   * event; combined with no rootExtraData the root event becomes simply {}.
-   * Has no effect on an already-initialized chain. Default: false.
+   * When true, omit the default "type", "chain" and "ts" properties from the
+   * root event; combined with no rootExtraData the root event becomes simply
+   * {}. Has no effect on an already-initialized chain. Default: false.
    */
   rootOmitDefaultData?: boolean;
 
@@ -142,7 +143,8 @@ export class EventChainLogger {
    * PostgreSQL older than 11), chain tables (created if absent, verified —
    * never altered — if present; throws SchemaMismatchError on mismatch),
    * genesis row, stored functions, and — if the chain is empty — the chain's
-   * root event (by default { "chain": "<random-uuid>", "ts": "<ISO 8601 UTC>" },
+   * root event (by default
+   * { "type": "chain-root", "chain": "<random-uuid>", "ts": "<ISO 8601 UTC>" },
    * shaped by the rootExtraData / rootOmitDefaultData constructor options).
    * Finally a server-side canary re-verifies hashes (throws
    * ChainVerificationError), proving on every connect that this server hashes
@@ -189,11 +191,11 @@ export class EventChainLogger {
   }
 
   /**
-   * Records a timestamp event { "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" } (current
-   * time, ISO 8601 UTC) to the chain and returns its 32-byte event id.
+   * Records a timestamp event { "type": "ts", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
+   * (current time, ISO 8601 UTC) to the chain and returns its 32-byte event id.
    */
   async timestamp(): Promise<Buffer> {
-    return this.recordEvent({ ts: new Date().toISOString() });
+    return this.recordEvent({ type: 'ts', ts: new Date().toISOString() });
   }
 
   /**

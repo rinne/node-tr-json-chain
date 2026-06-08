@@ -27,7 +27,7 @@ const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const log = new EventChainLogger(pool);
 
 // Schema is ensured automatically on first use (or call log.init() eagerly).
-const eventId = await log.recordEvent({ action: 'user.login', user: 42 });
+const eventId = await log.recordEvent({ type: 'user.login', user: 42 });
 console.log('event id:', eventId.toString('hex'));
 
 const head = await log.getChainHead();
@@ -52,8 +52,9 @@ event_id  = SHA256(parent_event_id ‖ data_hash)
 
 The chain starts from a fixed **genesis row** (`id 0`) whose `event_id` and
 `data_hash` are 256 zero bits, immediately followed by a **root event** (`id 1`)
-carrying the chain's random UUID identity and creation time (see
-[`init()`](#init-promisevoid)). Altering, removing, or reordering any historical event
+carrying the chain's random UUID identity and creation time (and a
+`"type": "chain-root"` marker — see
+[event `type` convention](#event-type-convention) and [`init()`](#init-promisevoid)). Altering, removing, or reordering any historical event
 changes every subsequent `event_id`, so the head id commits to the entire
 history. Publish or cross-log a head id periodically and you have an
 externally verifiable, tamper-evident audit log.
@@ -95,8 +96,8 @@ linked list.
   effect, and arrays/primitives throw `TypeError`. Has **no effect** on an
   already-initialized chain. For example
   `{ chain: 'kukkuu', foo: 1, bar: [1, 2, 3] }` yields the root event
-  `{ "chain": "kukkuu", "ts": "<ISO 8601 UTC>", "foo": 1, "bar": [1, 2, 3] }`.
-- `options.rootOmitDefaultData` — when `true`, omit the default `chain`
+  `{ "type": "chain-root", "chain": "kukkuu", "ts": "<ISO 8601 UTC>", "foo": 1, "bar": [1, 2, 3] }`.
+- `options.rootOmitDefaultData` — when `true`, omit the default `type`, `chain`
   and `ts` properties from the root event; with no `rootExtraData` the root
   event becomes simply `{}`. Default `false`. Also ignored on an
   already-initialized chain.
@@ -124,12 +125,14 @@ Idempotently ensures everything the logger needs:
    (default form):
 
    ```json
-   { "chain": "<random-uuid>", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
+   { "type": "chain-root", "chain": "<random-uuid>", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
    ```
 
    The UUID gives the chain a unique identity for the rest of its life; `ts`
    is the chain's creation time (ISO 8601 UTC) — `ts` is also the recommended
-   conventional timestamp property for your own subsequent events. The default
+   conventional timestamp property for your own subsequent events, and `type`
+   the recommended discriminator (see [event `type` convention](#event-type-convention)).
+   The default
    content can be extended/overridden with `rootExtraData` or reduced with
    `rootOmitDefaultData` (see the constructor options). The root event is
    recorded at most once, even under concurrent initialization;
@@ -160,10 +163,10 @@ Convenience shortcut that records the current time as an event and resolves to
 its 32-byte `event_id`:
 
 ```json
-{ "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
+{ "type": "ts", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
 ```
 
-Equivalent to `recordEvent({ ts: new Date().toISOString() })`.
+Equivalent to `recordEvent({ type: 'ts', ts: new Date().toISOString() })`.
 
 ### `getChainHead(): Promise<Buffer>`
 
@@ -238,6 +241,27 @@ const { events, start, end, have_more } = await log.getEvents(0, 100);
 | `ChainVerificationError` | the root event fails hash re-verification at init (tampering, or an incompatible server) |
 | `UnsupportedPostgresError` | the server lacks built-in `sha256()` (PostgreSQL < 11) |
 | `TypeError` | invalid namespace or non-JSON-serializable event data |
+
+## Event `type` convention
+
+The chain stores arbitrary JSON, so it does not impose a schema — but mixing
+event kinds in one append-only log is much easier to consume if every event
+carries a discriminator. The recommended convention is a top-level **`type`**
+string:
+
+```js
+await log.recordEvent({ type: 'user.login', user: 42, ip: '…' });
+await log.recordEvent({ type: 'order.placed', order: 1001, total: 9.95 });
+```
+
+The two events the library generates itself follow it:
+
+- the **root event** is `{ "type": "chain-root", "chain": "<uuid>", "ts": "…" }`;
+- **`timestamp()`** records `{ "type": "ts", "ts": "…" }`.
+
+This is only a convention — nothing in the chain enforces or depends on it, and
+you can drop it from the root event with `rootOmitDefaultData`. (`ts`, an ISO
+8601 UTC timestamp, is the companion convention for an event's own time.)
 
 ## Namespaces: multiple chains per database
 
@@ -349,7 +373,7 @@ NDJSON, in ascending `id` order:
 
 ```json
 {"event_id":"0000…0000","data_hash":"0000…0000"}
-{"event_id":"4fcb…bd44","parent_id":"0000…0000","data_hash":"f9d8…1310","hashed_data":"{\"ts\": \"2026-06-08T…Z\", \"chain\": \"8a2af…d769f\"}"}
+{"event_id":"4fcb…bd44","parent_id":"0000…0000","data_hash":"f9d8…1310","hashed_data":"{\"ts\": \"2026-06-08T…Z\", \"type\": \"chain-root\", \"chain\": \"8a2af…d769f\"}"}
 {"event_id":"2e9f…d243","parent_id":"4fcb…bd44","data_hash":"6929…cc1b","hashed_data":"{\"a\": 1}"}
 ```
 
