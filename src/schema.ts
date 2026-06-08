@@ -184,18 +184,48 @@ async function verifyGenesis(client: PoolClient, prefix: string): Promise<void> 
 }
 
 /**
+ * Options controlling the content of the chain's root event.
+ * Both only take effect when the chain is empty and a root event is being
+ * recorded; on a non-empty chain they are ignored.
+ */
+export interface RootEventOptions {
+  /**
+   * A plain object superimposed (Object.assign) on top of the default root
+   * event data. undefined/null have no effect. Keys override the defaults.
+   */
+  rootExtraData?: Record<string, unknown> | null;
+  /**
+   * When true, omit the default "chain" and "ts" properties; with no
+   * rootExtraData the root event becomes simply {}. Default: false.
+   */
+  rootOmitDefaultData?: boolean;
+}
+
+/**
  * Records the chain's root event if (and only if) the chain is empty, i.e.
- * holds nothing beyond the genesis row:
+ * holds nothing beyond the genesis row. By default:
  *
  *   { "chain": "<random-uuid>", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
  *
  * The UUID gives the chain a unique identity; "ts" (ISO 8601 UTC) is also
- * the conventional timestamp property for subsequent events. Idempotent
- * under concurrency: the caller holds the per-namespace advisory lock, and
- * the NOT EXISTS guard makes the statement a no-op on any non-empty chain.
+ * the conventional timestamp property for subsequent events. The defaults
+ * may be omitted (`rootOmitDefaultData`) and/or extended/overridden
+ * (`rootExtraData`). Idempotent under concurrency: the caller holds the
+ * per-namespace advisory lock, and the NOT EXISTS guard makes the statement
+ * a no-op on any non-empty chain.
  */
-async function ensureRootEvent(client: PoolClient, prefix: string): Promise<void> {
-  const root = { chain: randomUUID(), ts: new Date().toISOString() };
+async function ensureRootEvent(
+  client: PoolClient,
+  prefix: string,
+  options: RootEventOptions,
+): Promise<void> {
+  const base: Record<string, unknown> = options.rootOmitDefaultData
+    ? {}
+    : { chain: randomUUID(), ts: new Date().toISOString() };
+  const root =
+    options.rootExtraData != null
+      ? Object.assign(base, options.rootExtraData)
+      : base;
   await client.query(
     `SELECT ${prefix}event_record($1::jsonb)
       WHERE NOT EXISTS
@@ -241,12 +271,17 @@ async function verifyRootEvent(client: PoolClient, prefix: string): Promise<void
  * Idempotently ensures the chain schema for the given namespace prefix:
  * sha256() support, tables (create-if-absent + shape verification of
  * pre-existing ones), genesis row, stored functions (CREATE OR REPLACE),
- * and the chain's root event (recorded only into an empty chain).
+ * and the chain's root event (recorded only into an empty chain; its
+ * content is shaped by rootEventOptions).
  *
  * Runs in a single transaction serialized by a per-namespace advisory lock,
  * so concurrent initializers across processes are safe.
  */
-export async function ensureSchema(pool: Pool, prefix: string): Promise<void> {
+export async function ensureSchema(
+  pool: Pool,
+  prefix: string,
+  rootEventOptions: RootEventOptions = {},
+): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -258,7 +293,7 @@ export async function ensureSchema(pool: Pool, prefix: string): Promise<void> {
     await client.query(expand(TABLES_SQL, prefix));
     await verifyGenesis(client, prefix);
     await client.query(expand(FUNCTIONS_SQL, prefix));
-    await ensureRootEvent(client, prefix);
+    await ensureRootEvent(client, prefix, rootEventOptions);
     await verifyRootEvent(client, prefix);
     await client.query('COMMIT');
   } catch (err) {

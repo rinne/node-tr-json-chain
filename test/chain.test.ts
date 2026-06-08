@@ -86,6 +86,100 @@ describe('recordEvent', () => {
   });
 });
 
+describe('timestamp', () => {
+  it('records a { ts } event and returns its id', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'ts_basic' });
+    const before = Date.now();
+    const id = await log.timestamp();
+    const after = Date.now();
+    expect(id).toBeInstanceOf(Buffer);
+    expect(id.length).toBe(32);
+    const { rows } = await pool.query(
+      'SELECT d FROM ts_basic_event_payload WHERE event_id = $1',
+      [id],
+    );
+    expect(Object.keys(rows[0].d)).toEqual(['ts']);
+    const ts = Date.parse(rows[0].d.ts);
+    expect(ts).toBeGreaterThanOrEqual(before);
+    expect(ts).toBeLessThanOrEqual(after);
+    expect(await verifyChainInJs(pool, 'ts_basic')).toBe(3); // genesis + root + ts
+  });
+});
+
+describe('root event options', () => {
+  it('superimposes rootExtraData on the default root event', async () => {
+    const log = new EventChainLogger(pool, {
+      namespace: 'root_extra',
+      rootExtraData: { chain: 'kukkuu', foo: 1, bar: [1, 2, 3] },
+    });
+    await log.init();
+    const root = await getRoot(pool, 'root_extra');
+    expect(root.d.chain).toBe('kukkuu'); // overridden default
+    expect(root.d).toMatchObject({ foo: 1, bar: [1, 2, 3] });
+    expect(typeof root.d.ts).toBe('string'); // default ts kept
+    expect(await verifyChainInJs(pool, 'root_extra')).toBe(2); // genesis + root
+  });
+
+  it('omits default chain/ts with rootOmitDefaultData (empty object)', async () => {
+    const log = new EventChainLogger(pool, {
+      namespace: 'root_omit',
+      rootOmitDefaultData: true,
+    });
+    await log.init();
+    const root = await getRoot(pool, 'root_omit');
+    expect(root.d).toEqual({});
+    expect(await verifyChainInJs(pool, 'root_omit')).toBe(2);
+  });
+
+  it('combines rootOmitDefaultData with rootExtraData', async () => {
+    const log = new EventChainLogger(pool, {
+      namespace: 'root_omit_extra',
+      rootOmitDefaultData: true,
+      rootExtraData: { only: 'this' },
+    });
+    await log.init();
+    const root = await getRoot(pool, 'root_omit_extra');
+    expect(root.d).toEqual({ only: 'this' });
+  });
+
+  it('has no effect on an already-initialized chain', async () => {
+    const first = new EventChainLogger(pool, { namespace: 'root_existing' });
+    await first.init();
+    const rootBefore = await getRoot(pool, 'root_existing');
+
+    const second = new EventChainLogger(pool, {
+      namespace: 'root_existing',
+      rootExtraData: { ignored: true },
+    });
+    await second.init();
+    const rootAfter = await getRoot(pool, 'root_existing');
+    expect(rootAfter.d).toEqual(rootBefore.d);
+    expect(rootAfter.d.ignored).toBeUndefined();
+  });
+
+  it('null/undefined rootExtraData behaves like the default', async () => {
+    const log = new EventChainLogger(pool, {
+      namespace: 'root_null',
+      rootExtraData: null,
+    });
+    await log.init();
+    const root = await getRoot(pool, 'root_null');
+    expect(typeof root.d.chain).toBe('string');
+    expect(typeof root.d.ts).toBe('string');
+  });
+
+  it('rejects non-object rootExtraData before any SQL runs', () => {
+    for (const bad of [[1, 2, 3], 'str', 42, true]) {
+      expect(
+        () =>
+          new EventChainLogger(pool, {
+            rootExtraData: bad as unknown as Record<string, unknown>,
+          }),
+      ).toThrow(TypeError);
+    }
+  });
+});
+
 describe('getChainHead', () => {
   it('checkpoints over the root event on a freshly initialized chain', async () => {
     const log = new EventChainLogger(pool, { namespace: 'head_virgin' });

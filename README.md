@@ -82,8 +82,20 @@ linked list.
 - `pool` — a `pg.Pool`. The logger never closes it; lifecycle stays yours.
 - `options.namespace` — optional chain namespace (see
   [Namespaces](#namespaces-multiple-chains-per-database)).
+- `options.rootExtraData` — optional plain object superimposed
+  (`Object.assign`) on top of the default root-event data when the chain is
+  first initialized; keys override the defaults. `undefined`/`null` have no
+  effect, and arrays/primitives throw `TypeError`. Has **no effect** on an
+  already-initialized chain. For example
+  `{ chain: 'kukkuu', foo: 1, bar: [1, 2, 3] }` yields the root event
+  `{ "chain": "kukkuu", "ts": "<ISO 8601 UTC>", "foo": 1, "bar": [1, 2, 3] }`.
+- `options.rootOmitDefaultData` — when `true`, omit the default `chain`
+  and `ts` properties from the root event; with no `rootExtraData` the root
+  event becomes simply `{}`. Default `false`. Also ignored on an
+  already-initialized chain.
 
-The constructor throws `TypeError` synchronously on an invalid namespace.
+The constructor throws `TypeError` synchronously on an invalid namespace or a
+non-object `rootExtraData`.
 
 ### `init(): Promise<void>`
 
@@ -96,7 +108,8 @@ Idempotently ensures everything the logger needs:
    altered or dropped);
 3. creates missing tables, indexes, and the genesis row;
 4. installs/refreshes the stored functions (`CREATE OR REPLACE`);
-5. if the chain is empty (genesis only), records the chain's **root event**:
+5. if the chain is empty (genesis only), records the chain's **root event**
+   (default form):
 
    ```json
    { "chain": "<random-uuid>", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
@@ -104,8 +117,10 @@ Idempotently ensures everything the logger needs:
 
    The UUID gives the chain a unique identity for the rest of its life; `ts`
    is the chain's creation time (ISO 8601 UTC) — `ts` is also the recommended
-   conventional timestamp property for your own subsequent events. The root
-   event is recorded at most once, even under concurrent initialization;
+   conventional timestamp property for your own subsequent events. The default
+   content can be extended/overridden with `rootExtraData` or reduced with
+   `rootOmitDefaultData` (see the constructor options). The root event is
+   recorded at most once, even under concurrent initialization;
 
 6. re-verifies the root event server-side (the **canary check**, see below) —
    throws `ChainVerificationError` on mismatch.
@@ -126,6 +141,17 @@ Appends an event and resolves to its 32-byte `event_id`.
   stored; the payload itself is discarded. The hash still commits to the
   payload, so you can later prove that a payload you retained out-of-band was
   recorded, without keeping it in the database. Default `true`.
+
+### `timestamp(): Promise<Buffer>`
+
+Convenience shortcut that records the current time as an event and resolves to
+its 32-byte `event_id`:
+
+```json
+{ "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
+```
+
+Equivalent to `recordEvent({ ts: new Date().toISOString() })`.
 
 ### `getChainHead(): Promise<Buffer>`
 
