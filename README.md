@@ -548,6 +548,10 @@ docker compose -f test/docker-compose.yml up -d
 TR_JSON_CHAIN_TEST_URL=postgres://postgres:postgres@localhost:5433/postgres npm test
 ```
 
+## Author
+
+Timo J. Rinne <tri@iki.fi>
+
 ## License
 
 MIT
