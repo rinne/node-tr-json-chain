@@ -37,6 +37,11 @@ export interface GetEventsOptions {
 
 /** One event as returned by {@link EventChainLogger.getEvents} (ids are hex). */
 export interface ChainEventDetail {
+  /**
+   * The event's chain position — `event_chain.id` (genesis 0, root 1, …).
+   * Always present; equals the event's index in the chain.
+   */
+  id: number;
   event_id: string;
   /** Stored JSONB payload; omitted if no payload was kept. */
   data?: unknown;
@@ -357,7 +362,7 @@ export class EventChainLogger {
     const inclHash = opts.includeDataHash === true;
     const inclParent = opts.includeParentId === true;
     const events: ChainEventDetail[] = res.rows.map((row) => {
-      const ev: ChainEventDetail = { event_id: row.event_id };
+      const ev: ChainEventDetail = { id: Number(row.id), event_id: row.event_id };
       if (row.data !== null) ev.data = row.data;
       if (inclParent && row.parent_id !== null) ev.parent_id = row.parent_id;
       if (inclHash) ev.data_hash = row.data_hash;

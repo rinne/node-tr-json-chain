@@ -221,8 +221,10 @@ const { events, start, end, have_more } = await log.getEvents(0, 100);
     if (!x.have_more) break;
   }
   ```
-- Each event is `{ event_id: '<hex>' }` plus `data` (the JSONB payload) when one
-  was stored — so the genesis row and empty checkpoint events have no `data`.
+- Each event is `{ id, event_id: '<hex>' }` plus `data` (the JSONB payload) when
+  one was stored — so the genesis row and empty checkpoint events have no `data`.
+  `id` is the event's chain position (`event_chain.id`: genesis 0, root 1, …),
+  always present, equal to the event's index in the chain.
 - `options` (always the last argument; also valid as the sole or second
   argument) adds per-event fields, all hex/string and all default `false`:
   - `includeParentId` → `parent_id` (omitted for genesis, which has none);

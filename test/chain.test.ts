@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
-import { EventChainLogger } from '../src';
+import { EventChainLogger, EventChainCsvExport, EventChainCsvParse } from '../src';
+import type { ChainEventDetail } from '../src';
 import { ZERO, getRoot, makePool, sha256, verifyChainInJs } from './helpers';
 
 const pool = makePool();
@@ -501,5 +502,101 @@ describe('external hash compatibility (portability contract)', () => {
       }
       prev = ev.event_id;
     }
+  });
+});
+
+describe('CSV export/parse (integration)', () => {
+  const ALL_FIELDS = {
+    includeHashedData: true,
+    includeDataHash: true,
+    includeParentId: true,
+  } as const;
+  const ZERO_HEX = '00'.repeat(32);
+
+  // Pages through the entire chain (genesis included) with all optional fields.
+  async function fullChain(log: EventChainLogger): Promise<ChainEventDetail[]> {
+    const all: ChainEventDetail[] = [];
+    for (let from = 0; ; ) {
+      const page = await log.getEvents(from, ALL_FIELDS);
+      all.push(...page.events);
+      if (!page.have_more) break;
+      from = page.end + 1;
+    }
+    return all;
+  }
+
+  // Reproduces the tools' current exportChain() formatting exactly. The new
+  // EventChainCsvExport must match this byte-for-byte — this is the guard on the
+  // cross-package CSV boundary (CLI /export ↔ tr-json-chain-check).
+  function legacyCsv(events: ChainEventDetail[]): string {
+    const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
+    let out = '#;event_id;parent_id;data_hash;data\n';
+    for (const ev of events) {
+      const data = ev.hashed_data === undefined ? '' : q(ev.hashed_data);
+      out += `${ev.id};${ev.event_id};${ev.parent_id};${ev.data_hash};${data}\n`;
+    }
+    return out;
+  }
+
+  it('getEvents carries id equal to the chain index', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'csv_id' });
+    await log.init();
+    await log.recordEvent({ a: 1 });
+    await log.recordEvent({ b: 2 });
+    const all = await fullChain(log);
+    all.forEach((ev, i) => expect(ev.id).toBe(i)); // genesis 0, root 1, …
+  });
+
+  it('encoder output is byte-identical to the legacy exportChain format', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'csv_bytes' });
+    await log.init();
+    await log.recordEvent({ a: 1 });
+    await log.recordEvent({ s: 'a;b "q"', u: 'ä€漢🎉' }); // quotes, delimiter, unicode
+    await log.recordEvent({ secret: true }, { storePayload: false }); // real hash, no payload
+    await log.getChainHead(); // empty checkpoint: all-zero data_hash, no payload
+    const nonGenesis = (await fullChain(log)).filter((ev) => ev.id !== 0);
+
+    const enc = new EventChainCsvExport();
+    let mine = enc.header() + '\n';
+    for (const ev of nonGenesis) mine += enc.event(ev) + '\n';
+
+    expect(mine).toBe(legacyCsv(nonGenesis));
+  });
+
+  it('round-trips a real chain through the parser with full verification', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'csv_roundtrip' });
+    await log.init();
+    await log.recordEvent({ a: 1 });
+    await log.recordEvent({ nested: { deep: [1, 2.5, null, true, { x: [] }] } });
+    await log.recordEvent({ secret: true }, { storePayload: false });
+    await log.getChainHead();
+    const nonGenesis = (await fullChain(log)).filter((ev) => ev.id !== 0);
+
+    const enc = new EventChainCsvExport();
+    const parser = new EventChainCsvParse(enc.header(), { verifyHashes: true, verifyLinks: true });
+    let payloadPresent = 0;
+    let realEvents = 0;
+    for (const ev of nonGenesis) {
+      const out = parser.row(enc.event(ev)); // throws on any hash/link violation
+      if (out.hashed_data !== undefined) payloadPresent++;
+      if (out.data_hash !== ZERO_HEX) realEvents++;
+    }
+    const summary = parser.end();
+    expect(summary.count).toBe(nonGenesis.length);
+    expect(summary.partial).toBe(false);
+    expect(summary.payloadPresent).toBe(payloadPresent);
+    expect(summary.realEvents).toBe(realEvents);
+    expect(summary.lastEventId).toBe(nonGenesis[nonGenesis.length - 1].id);
+  });
+
+  it('verifies a partial slice (export starting mid-chain)', async () => {
+    const log = new EventChainLogger(pool, { namespace: 'csv_partial' });
+    await log.init();
+    for (let i = 0; i < 4; i++) await log.recordEvent({ n: i });
+    const page = await log.getEvents(2, ALL_FIELDS); // ids 2.., a non-root start
+    const enc = new EventChainCsvExport();
+    const parser = new EventChainCsvParse(enc.header(), { verifyHashes: true, verifyLinks: true });
+    for (const ev of page.events) parser.row(enc.event(ev));
+    expect(parser.end().partial).toBe(true);
   });
 });

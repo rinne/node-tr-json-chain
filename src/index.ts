@@ -12,3 +12,10 @@ export {
   SchemaMismatchError,
   UnsupportedPostgresError,
 } from './schema';
+export {
+  EventChainCsvExport,
+  EventChainCsvParse,
+  type EventChainCsvParseOptions,
+  type ParsedRow,
+  type CsvParseSummary,
+} from './csv';
