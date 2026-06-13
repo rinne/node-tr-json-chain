@@ -1,19 +1,17 @@
 import type { Pool } from 'pg';
-import { ensureSchema, namespacePrefix, type RootEventOptions } from './schema';
-
-// The genesis row's event_id (32 zero bytes); the root event is the unique
-// row whose parent_id points at it.
-const ZERO_HASH = Buffer.alloc(32);
+import {
+  ensureSchema,
+  namespacePrefix,
+  runChainCheck,
+  chainVerificationMessage,
+  ChainNotInitializedError,
+  ChainVerificationError,
+  type RootEventOptions,
+  type VerifyResult,
+} from './schema';
 
 // getEvents() never returns more than this many events in one call.
 const MAX_EVENTS = 1000;
-
-/** A chain event id together with its payload, if the payload was stored. */
-export interface ChainEvent {
-  event_id: Buffer;
-  /** The stored JSONB payload; omitted entirely if no payload was kept. */
-  data?: unknown;
-}
 
 /** Which optional per-event fields {@link EventChainLogger.getEvents} includes. */
 export interface GetEventsOptions {
@@ -109,6 +107,32 @@ export interface RecordEventOptions {
    * itself is discarded. Default: true.
    */
   storePayload?: boolean;
+  /**
+   * When true, the call resolves to the full {@link ChainEventDetail} for the
+   * new event (all fields populated) instead of just its `event_id` hex string.
+   *
+   * This is the only way to obtain the canonical `hashed_data` (the exact text
+   * that was hashed) for an event recorded with `storePayload: false` — record
+   * time is the only moment that text exists, since no `event_payload` row is
+   * kept for later retrieval. Default: false.
+   */
+  returnFullEventData?: boolean;
+}
+
+/** Options for {@link EventChainLogger.verify}. */
+export interface VerifyOptions {
+  /**
+   * When true, verify the entire chain (re-hash + re-link every event) instead
+   * of only the root-event canary. Heavier (scales with chain length). Default: false.
+   */
+  full?: boolean;
+  /**
+   * When true (the default), an integrity mismatch throws `ChainVerificationError`.
+   * When false, `verify` instead resolves to a `{ ok: false, … }` result so
+   * audit/monitoring callers can branch on it. Operational failures (not
+   * initialized, no `sha256()`, connection errors) always throw regardless.
+   */
+  throwOnMismatch?: boolean;
 }
 
 /**
@@ -176,66 +200,103 @@ export class EventChainLogger {
   }
 
   /**
-   * Appends an event to the chain and returns its 32-byte event id.
+   * Appends an event to the chain.
    *
-   * The payload is any JSON-serializable value. Note that PostgreSQL
-   * normalizes JSONB (key order, whitespace, duplicate keys) before hashing;
-   * see the README's verification notes.
+   * By default resolves to the new event's `event_id` as a lowercase hex
+   * string. With `returnFullEventData: true` it resolves to the full
+   * {@link ChainEventDetail} instead (all fields populated, including the
+   * canonical `hashed_data` even when the payload is not stored).
+   *
+   * The payload is any JSON-serializable value. Note that PostgreSQL normalizes
+   * JSONB (key order, whitespace, duplicate keys) before hashing; see the
+   * README's verification notes. The returned `data` is that normalized value.
    */
-  async recordEvent(data: unknown, options: RecordEventOptions = {}): Promise<Buffer> {
+  recordEvent(
+    data: unknown,
+    options?: RecordEventOptions & { returnFullEventData?: false },
+  ): Promise<string>;
+  recordEvent(
+    data: unknown,
+    options: RecordEventOptions & { returnFullEventData: true },
+  ): Promise<ChainEventDetail>;
+  async recordEvent(
+    data: unknown,
+    options: RecordEventOptions = {},
+  ): Promise<string | ChainEventDetail> {
     const json = JSON.stringify(data);
     if (json === undefined) {
       throw new TypeError('event data must be JSON-serializable (got undefined)');
     }
     await this.init();
-    const res = await this.#pool.query(
-      `SELECT ${this.#prefix}event_record($1::jsonb, $2) AS event_id`,
-      [json, options.storePayload !== false],
+    const storePayload = options.storePayload !== false;
+
+    if (options.returnFullEventData !== true) {
+      const res = await this.#pool.query(
+        `SELECT encode(${this.#prefix}event_record($1::jsonb, $2), 'hex') AS event_id`,
+        [json, storePayload],
+      );
+      return res.rows[0].event_id as string;
+    }
+
+    // Record, then read back id/parent_id/data_hash for the (immutable) new row
+    // by its event_id, deriving the canonical text + normalized value from the
+    // input — so it works even when the payload is not stored. `($1::jsonb)::text`
+    // is byte-identical to what event_record() hashed. (A single statement can't
+    // do both: the function's INSERT isn't visible to that statement's snapshot.)
+    const rec = await this.#pool.query(
+      `SELECT encode(${this.#prefix}event_record($1::jsonb, $2), 'hex') AS event_id`,
+      [json, storePayload],
     );
-    return res.rows[0].event_id;
+    const eventId = rec.rows[0].event_id as string;
+    const res = await this.#pool.query(
+      `SELECT c.id,
+              encode(c.parent_id, 'hex') AS parent_id,
+              encode(c.data_hash, 'hex') AS data_hash,
+              ($1::jsonb)::text AS hashed_data,
+              $1::jsonb AS data
+         FROM ${this.#prefix}event_chain c WHERE c.event_id = $2`,
+      [json, Buffer.from(eventId, 'hex')],
+    );
+    const row = res.rows[0];
+    return {
+      id: Number(row.id),
+      event_id: eventId,
+      parent_id: row.parent_id,
+      data_hash: row.data_hash,
+      hashed_data: row.hashed_data,
+      data: row.data,
+    };
   }
 
   /**
    * Records a timestamp event { "type": "ts", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
-   * (current time, ISO 8601 UTC) to the chain and returns its 32-byte event id.
+   * (current time, ISO 8601 UTC). Returns the event's `event_id` hex string, or
+   * the full {@link ChainEventDetail} with `returnFullEventData: true`.
    */
-  async timestamp(): Promise<Buffer> {
-    return this.recordEvent({ type: 'ts', ts: new Date().toISOString() });
+  timestamp(options?: RecordEventOptions & { returnFullEventData?: false }): Promise<string>;
+  timestamp(options: RecordEventOptions & { returnFullEventData: true }): Promise<ChainEventDetail>;
+  async timestamp(options: RecordEventOptions = {}): Promise<string | ChainEventDetail> {
+    return this.recordEvent(
+      { type: 'ts', ts: new Date().toISOString() },
+      options as RecordEventOptions & { returnFullEventData: true },
+    );
   }
 
   /**
-   * Returns the chain's root event — the first event after genesis, carrying
-   * the chain's identity. Resolves to `{ event_id }`, plus `data` (the stored
-   * JSONB payload) when the payload was kept.
+   * Returns the chain's root event (the first event after genesis, carrying the
+   * chain's identity) as a {@link ChainEventDetail} — equivalent to
+   * `getEvent(1, options)`.
    *
-   * Unlike the other accessors this does NOT initialize the chain: it reads
-   * the existing state and throws an Error if the chain is uninitialized
-   * (tables absent, or no root event recorded yet).
+   * Unlike `getEvent`, this stays a "give me the root or fail" accessor: it
+   * throws {@link ChainNotInitializedError} when no root event exists (tables
+   * absent, or only the genesis row). It does NOT initialize the chain.
    */
-  async getRootEvent(): Promise<ChainEvent> {
-    let res;
-    try {
-      res = await this.#pool.query(
-        `SELECT c.event_id, p.d AS data
-           FROM ${this.#prefix}event_chain c
-           LEFT JOIN ${this.#prefix}event_payload p ON p.event_id = c.event_id
-          WHERE c.parent_id = $1`,
-        [ZERO_HASH],
-      );
-    } catch (err) {
-      // undefined_table — the chain tables don't exist yet.
-      if ((err as { code?: string }).code === '42P01') {
-        throw new Error('chain is not initialized (tables do not exist)');
-      }
-      throw err;
+  async getRootEvent(options?: GetEventsOptions): Promise<ChainEventDetail> {
+    const root = await this.getEvent(1, options);
+    if (root === null) {
+      throw new ChainNotInitializedError('chain is not initialized (no root event)');
     }
-    if (res.rowCount === 0) {
-      throw new Error('chain is not initialized (no root event)');
-    }
-    const row = res.rows[0] as { event_id: Buffer; data: unknown };
-    const event: ChainEvent = { event_id: row.event_id };
-    if (row.data !== null) event.data = row.data;
-    return event;
+    return root;
   }
 
   /**
@@ -322,12 +383,12 @@ export class EventChainLogger {
       );
     } catch (err) {
       if ((err as { code?: string }).code === '42P01') {
-        throw new Error('chain is not initialized (tables do not exist)');
+        throw new ChainNotInitializedError('chain is not initialized (tables do not exist)');
       }
       throw err;
     }
     if (maxRes.rows[0].max === null) {
-      throw new Error('chain is not initialized (no genesis row)');
+      throw new ChainNotInitializedError('chain is not initialized (no genesis row)');
     }
     const len = Number(maxRes.rows[0].max) + 1;
 
@@ -376,16 +437,58 @@ export class EventChainLogger {
   }
 
   /**
-   * Returns the chain head's 32-byte event id. If the head is not already an
-   * empty checkpoint event, one is appended first — so repeated calls return
-   * the same id instead of piling up empty events. On a virgin chain this is
-   * the genesis id (32 zero bytes).
+   * Returns a single event by its `id` (chain position), as a
+   * {@link ChainEventDetail}, or `null` if no such event exists.
+   *
+   * A thin wrapper over {@link getEvents} with `slice`-style indexing, so it
+   * inherits negative indexing: `getEvent(-1)` is the last event (a
+   * non-mutating head peek, unlike {@link getChainHead}), `getEvent(0)` the
+   * genesis row, `getEvent(1)` the root. Out-of-range ids resolve to `null`.
+   * Does NOT initialize the chain (throws {@link ChainNotInitializedError} when
+   * uninitialized, via `getEvents`).
    */
-  async getChainHead(): Promise<Buffer> {
+  async getEvent(id: number, options?: GetEventsOptions): Promise<ChainEventDetail | null> {
+    if (!Number.isInteger(id)) {
+      throw new TypeError(`id must be an integer (got ${String(id)})`);
+    }
+    // `id + 1` as the exclusive end picks exactly index `id`; but for `id === -1`
+    // that end would be 0 (an empty slice), so use "to the end" there.
+    const end = id === -1 ? undefined : id + 1;
+    const page = await this.getEvents(id, end, options);
+    return page.events[0] ?? null;
+  }
+
+  /**
+   * Returns the chain head's event id as a lowercase hex string. If the head is
+   * not already an empty checkpoint event, one is appended first — so repeated
+   * calls return the same id instead of piling up empty events. On a virgin
+   * chain this is the genesis id (64 zero hex chars). Mutating: for a read-only
+   * peek at the current tip, use {@link getEvent}(-1) instead.
+   */
+  async getChainHead(): Promise<string> {
     await this.init();
     const res = await this.#pool.query(
-      `SELECT ${this.#prefix}event_head() AS event_id`,
+      `SELECT encode(${this.#prefix}event_head(), 'hex') AS event_id`,
     );
-    return res.rows[0].event_id;
+    return res.rows[0].event_id as string;
+  }
+
+  /**
+   * Verifies chain integrity server-side, on demand (the same check `init()`
+   * runs): the root-event canary by default, or the entire chain with
+   * `{ full: true }`. Resolves to a {@link VerifyResult}.
+   *
+   * On an integrity mismatch it throws {@link ChainVerificationError} by default;
+   * pass `{ throwOnMismatch: false }` to instead resolve to `{ ok: false, … }`.
+   * Operational failures always throw: {@link ChainNotInitializedError} if the
+   * chain doesn't exist, plus connection / `sha256()`-support errors. Does NOT
+   * initialize the chain.
+   */
+  async verify(options: VerifyOptions = {}): Promise<VerifyResult> {
+    const result = await runChainCheck(this.#pool, this.#prefix, options.full === true);
+    if (!result.ok && options.throwOnMismatch !== false) {
+      throw new ChainVerificationError(chainVerificationMessage(this.#prefix, result));
+    }
+    return result;
   }
 }

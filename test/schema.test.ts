@@ -50,7 +50,7 @@ describe('init', () => {
     await log2.init();
     const { rows } = await pool.query(
       'SELECT d FROM init_idem_event_payload WHERE event_id = $1',
-      [id],
+      [Buffer.from(id, 'hex')],
     );
     expect(rows[0].d).toEqual({ kept: true });
     expect(await verifyChainInJs(pool, 'init_idem')).toBe(3); // genesis + root + 1
@@ -197,7 +197,7 @@ describe('structural chain integrity', () => {
     const id = await log.recordEvent({ a: 1 }); // genesis 0, root 1, event 2
     const { rows } = await pool.query(
       'SELECT parent_id FROM guard_fork_event_chain WHERE event_id = $1',
-      [id],
+      [Buffer.from(id, 'hex')],
     );
     await expect(
       pool.query(

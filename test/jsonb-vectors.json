@@ -1,0 +1,433 @@
+{
+  "_comment": "JSONB canonicalization golden vectors. Source values are raw JSON strings. Generated on PostgreSQL 16 via scripts/gen-jsonb-vectors.mjs. data_hash = sha256(convert_to(input::jsonb::text, UTF8)). These must reproduce byte-identically on every supported PostgreSQL version.",
+  "generatedOnServerVersion": "16.14 (Debian 16.14-1.pgdg13+1)",
+  "count": 71,
+  "vectors": [
+    {
+      "name": "scalar-null",
+      "input": "null",
+      "canonical": "null",
+      "data_hash": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+    },
+    {
+      "name": "scalar-true",
+      "input": "true",
+      "canonical": "true",
+      "data_hash": "b5bea41b6c623f7c09f1bf24dcae58ebab3c0cdd90ad966bc43a45b44867e12b"
+    },
+    {
+      "name": "scalar-false",
+      "input": "false",
+      "canonical": "false",
+      "data_hash": "fcbcf165908dd18a9e49f7ff27810176db8e9f63b4352213741664245224f8aa"
+    },
+    {
+      "name": "scalar-zero",
+      "input": "0",
+      "canonical": "0",
+      "data_hash": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "name": "scalar-one",
+      "input": "1",
+      "canonical": "1",
+      "data_hash": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b"
+    },
+    {
+      "name": "scalar-neg",
+      "input": "-1",
+      "canonical": "-1",
+      "data_hash": "1bad6b8cf97131fceab8543e81f7757195fbb1d36b376ee994ad1cf17699c464"
+    },
+    {
+      "name": "scalar-int",
+      "input": "42",
+      "canonical": "42",
+      "data_hash": "73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049"
+    },
+    {
+      "name": "scalar-float",
+      "input": "2.5",
+      "canonical": "2.5",
+      "data_hash": "b8736b999909049671d0ea075a42b308a5fbe2df1854899123fe09eb0ee9de61"
+    },
+    {
+      "name": "scalar-neg-float",
+      "input": "-3.14",
+      "canonical": "-3.14",
+      "data_hash": "6ade2dc17d9584fdb544ec69cdaccf013757ae379723ecc8606214bcb3d53219"
+    },
+    {
+      "name": "scalar-empty-string",
+      "input": "\"\"",
+      "canonical": "\"\"",
+      "data_hash": "12ae32cb1ec02d01eda3581b127c1fee3b0dc53572ed6baf239721a03d82e126"
+    },
+    {
+      "name": "scalar-string",
+      "input": "\"hello\"",
+      "canonical": "\"hello\"",
+      "data_hash": "5aa762ae383fbb727af3c7a36d4940a5b8c40a989452d2304fc958ff3f354e7a"
+    },
+    {
+      "name": "scalar-string-space",
+      "input": "\"with space\"",
+      "canonical": "\"with space\"",
+      "data_hash": "5196f73eacab7f782b93e1c3e1e76a8f0511faa9dd02c86a14a5162521fc4c5b"
+    },
+    {
+      "name": "num-one-dot-zero",
+      "input": "1.0",
+      "canonical": "1.0",
+      "data_hash": "d0ff5974b6aa52cf562bea5921840c032a860a91a3512f7fe8f768f6bbe005f6"
+    },
+    {
+      "name": "num-hundred-dot-zerozero",
+      "input": "100.00",
+      "canonical": "100.00",
+      "data_hash": "d66c66a96157220af2fe47c6d564d0d2a61d9d441a2e52a92bc78b15876053c8"
+    },
+    {
+      "name": "num-trailing-zero",
+      "input": "0.10",
+      "canonical": "0.10",
+      "data_hash": "b4af9cbcd052a654a1a0298bffe1abc80d2ccd211031e89c4ee23d84bacd1d42"
+    },
+    {
+      "name": "num-sci-lower",
+      "input": "1e3",
+      "canonical": "1000",
+      "data_hash": "40510175845988f13f6162ed8526f0b09f73384467fa855e1e79b44a56562a58"
+    },
+    {
+      "name": "num-sci-upper",
+      "input": "1E3",
+      "canonical": "1000",
+      "data_hash": "40510175845988f13f6162ed8526f0b09f73384467fa855e1e79b44a56562a58"
+    },
+    {
+      "name": "num-sci-big",
+      "input": "1e21",
+      "canonical": "1000000000000000000000",
+      "data_hash": "b3c4d9d40b4c90b3995fea02caaf40503883e2b8b9aa1420063f090f42186f21"
+    },
+    {
+      "name": "num-sci-neg-exp",
+      "input": "1e-7",
+      "canonical": "0.0000001",
+      "data_hash": "4035c4eedb2f0cf061cb4aedac998085c68fc1a1f5a3cc5de86c5086ba770324"
+    },
+    {
+      "name": "num-point-one",
+      "input": "0.1",
+      "canonical": "0.1",
+      "data_hash": "14be4b45f18e0d8c67b4f719b5144eee88497e413709d11d85b096d8e2346310"
+    },
+    {
+      "name": "num-neg-zero",
+      "input": "-0",
+      "canonical": "0",
+      "data_hash": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "name": "num-long-decimal",
+      "input": "3.141592653589793238462643383279",
+      "canonical": "3.141592653589793238462643383279",
+      "data_hash": "27f6ef06c05a66675cc7f80fca76488b57496bfa62c362128194da38905f2a76"
+    },
+    {
+      "name": "num-past-2^53",
+      "input": "9007199254740993",
+      "canonical": "9007199254740993",
+      "data_hash": "a1c367c29158357e62a3ff5d3e800fb7698a22396439dbc0a9d4929322afd35d"
+    },
+    {
+      "name": "num-neg-past-2^53",
+      "input": "-9007199254740993",
+      "canonical": "-9007199254740993",
+      "data_hash": "7d7aaf1cc7ba0797dd856e1f40fc9f3dd00d70b497e32fb6493faaa587b90435"
+    },
+    {
+      "name": "num-huge-int",
+      "input": "123456789012345678901234567890",
+      "canonical": "123456789012345678901234567890",
+      "data_hash": "f54e5c8f810648e7638d25eb7ed6d24b7e5999d588e88826f2aa837d2ee52ecd"
+    },
+    {
+      "name": "str-tab",
+      "input": "\"tab\\there\"",
+      "canonical": "\"tab\\there\"",
+      "data_hash": "1188737362906cacc96bc6916f6be25d751e992befa61593aa2c1bf8c81974e3"
+    },
+    {
+      "name": "str-newline",
+      "input": "\"new\\nline\"",
+      "canonical": "\"new\\nline\"",
+      "data_hash": "0691ee4f3e760abc999b075d805435a1b1ed63c96f65e1345f014caa2cabe400"
+    },
+    {
+      "name": "str-quote",
+      "input": "\"a \\\"quoted\\\" word\"",
+      "canonical": "\"a \\\"quoted\\\" word\"",
+      "data_hash": "7485280a26b20236d3787de4182cfc939b26b4167c6a9743bfdbedf2363d56b4"
+    },
+    {
+      "name": "str-backslash",
+      "input": "\"back\\\\slash\"",
+      "canonical": "\"back\\\\slash\"",
+      "data_hash": "a089aafdc3951fa2ceb7a2ec3e391a1d638de7abfd30464d5e7e5c65fcc1bf15"
+    },
+    {
+      "name": "str-slash",
+      "input": "\"a/b/c\"",
+      "canonical": "\"a/b/c\"",
+      "data_hash": "96a51dd2414a58ec2b74a4be98c5a509810d0551063b1e77cb8bfb2f85594bc9"
+    },
+    {
+      "name": "str-control",
+      "input": "\"\\u0001\\u001f end\"",
+      "canonical": "\"\\u0001\\u001f end\"",
+      "data_hash": "5150b997e01decb3c655ea9d38fffba631dd4574c878196e63883b7aa2692916"
+    },
+    {
+      "name": "str-escaped-unicode",
+      "input": "\"\\u00e4\\u20ac\"",
+      "canonical": "\"ä€\"",
+      "data_hash": "bbff85673954cd26b2ff017d374a2570614d3e1261048093adb55c711880e943"
+    },
+    {
+      "name": "str-latin1",
+      "input": "\"ä ö ü ß é\"",
+      "canonical": "\"ä ö ü ß é\"",
+      "data_hash": "50eb072674c77548be69d85c6b687d54984df3eac0da7535293bcb30150b16c0"
+    },
+    {
+      "name": "str-euro-cjk",
+      "input": "\"ä€漢\"",
+      "canonical": "\"ä€漢\"",
+      "data_hash": "71238572a8526950f5c13b4003668e3d01bcfa286daaf95833d66e231f1022fa"
+    },
+    {
+      "name": "str-emoji",
+      "input": "\"🎉 party 🎊\"",
+      "canonical": "\"🎉 party 🎊\"",
+      "data_hash": "fc9a469b65857045b522d89b915ada943626378efe60b15e37de971f83f4c87f"
+    },
+    {
+      "name": "str-cyrillic",
+      "input": "\"Москва\"",
+      "canonical": "\"Москва\"",
+      "data_hash": "03515482620338df2d398c6bf29fbd393e2ce010ba295935b59e683ef8ab090a"
+    },
+    {
+      "name": "str-japanese",
+      "input": "\"日本語テスト\"",
+      "canonical": "\"日本語テスト\"",
+      "data_hash": "7df8f217d72bfb44feeccc0c4187e31270fb6c566b2cb236e489a21cf0bead56"
+    },
+    {
+      "name": "str-zwj-family",
+      "input": "\"👨‍👩‍👧‍👦\"",
+      "canonical": "\"👨‍👩‍👧‍👦\"",
+      "data_hash": "e9558f1d697112824dacd123e125305d58fed0fae51d8df860dea0015fc5710e"
+    },
+    {
+      "name": "empty-object",
+      "input": "{}",
+      "canonical": "{}",
+      "data_hash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+    },
+    {
+      "name": "empty-array",
+      "input": "[]",
+      "canonical": "[]",
+      "data_hash": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "name": "keys-length-then-bytewise",
+      "input": "{\"bb\":1,\"a\":2}",
+      "canonical": "{\"a\": 2, \"bb\": 1}",
+      "data_hash": "0f3df1ebc9adb362410aa2fcfdd86a256f96e3ec5a4f4dc86676b6a214e38649"
+    },
+    {
+      "name": "keys-varlen",
+      "input": "{\"x\":1,\"yy\":2,\"zzz\":3,\"a\":4}",
+      "canonical": "{\"a\": 4, \"x\": 1, \"yy\": 2, \"zzz\": 3}",
+      "data_hash": "48caa671191e9ef87d558584a7b0a6d0e54df337c616d5ebb0611e4ded6d7f5c"
+    },
+    {
+      "name": "keys-case",
+      "input": "{\"b\":1,\"B\":2,\"a\":3,\"A\":4}",
+      "canonical": "{\"A\": 4, \"B\": 2, \"a\": 3, \"b\": 1}",
+      "data_hash": "0b5388656c148234d6a3ca39abb11f86988d3877defcc6650124a8013c629be7"
+    },
+    {
+      "name": "keys-dup-simple",
+      "input": "{\"a\":1,\"a\":2}",
+      "canonical": "{\"a\": 2}",
+      "data_hash": "e5a9d5b0300e0f50d372e5a9ddfa24208aac9a940ce9a36f247387221ae205fe"
+    },
+    {
+      "name": "keys-dup-interleaved",
+      "input": "{\"a\":1,\"b\":2,\"a\":3}",
+      "canonical": "{\"a\": 3, \"b\": 2}",
+      "data_hash": "34600dd287a7fe5153d2ee3752ccdc970a90166cb940849bc3bfa7c1733d07a6"
+    },
+    {
+      "name": "whitespace-object",
+      "input": "{ \"a\" : 1 ,   \"b\":2 }",
+      "canonical": "{\"a\": 1, \"b\": 2}",
+      "data_hash": "d8497d9d82770a70729261095aa98f7ef5154d7af499f8037b6ca250296785a6"
+    },
+    {
+      "name": "whitespace-array",
+      "input": "[ 1 , 2 ,3]",
+      "canonical": "[1, 2, 3]",
+      "data_hash": "a36b1f2c3f84522dd1005145646617d7054c0851e97c72a039c0bdfac9fa07f3"
+    },
+    {
+      "name": "keys-nonascii",
+      "input": "{\"ä\":1,\"漢\":2,\"a\":3}",
+      "canonical": "{\"a\": 3, \"ä\": 1, \"漢\": 2}",
+      "data_hash": "1766b15cc5600ea30ef324a293489e728abe4cee0edf261d3cedaef4590fb8f4"
+    },
+    {
+      "name": "keys-umlaut",
+      "input": "{\"keyWithÜmlaut\":true,\"a\":1}",
+      "canonical": "{\"a\": 1, \"keyWithÜmlaut\": true}",
+      "data_hash": "893bda715712e1f8df71fc85eeb1845e6f62662158b06c09cf1f9c2636b457a4"
+    },
+    {
+      "name": "keys-growing",
+      "input": "{\"a\":1,\"ab\":2,\"abc\":3,\"abcd\":4,\"x\":5}",
+      "canonical": "{\"a\": 1, \"x\": 5, \"ab\": 2, \"abc\": 3, \"abcd\": 4}",
+      "data_hash": "29f9b34ba29059692478508444d4ce8b782bd49e3b36c1dc8a3965043aa29462"
+    },
+    {
+      "name": "nested-object",
+      "input": "{\"o\":{\"i\":[1,2,{\"deep\":true}]}}",
+      "canonical": "{\"o\": {\"i\": [1, 2, {\"deep\": true}]}}",
+      "data_hash": "76a9eba7f5c62dd497ef5d3c927300ee455615310580830a55d5fcd5074c2872"
+    },
+    {
+      "name": "nested-array",
+      "input": "[\"a\",null,true,1.5,{\"k\":\"v\"},[1,[2,[3]]]]",
+      "canonical": "[\"a\", null, true, 1.5, {\"k\": \"v\"}, [1, [2, [3]]]]",
+      "data_hash": "0f072297de83fcf60fe7b8a145e5752b35be78cca14414711fdd61be38259d2a"
+    },
+    {
+      "name": "mixed-types",
+      "input": "{\"n\":null,\"b\":false,\"t\":true,\"i\":5,\"f\":1.5,\"s\":\"x\",\"arr\":[1,2],\"obj\":{\"y\":9}}",
+      "canonical": "{\"b\": false, \"f\": 1.5, \"i\": 5, \"n\": null, \"s\": \"x\", \"t\": true, \"arr\": [1, 2], \"obj\": {\"y\": 9}}",
+      "data_hash": "5d78c4b7e1c7627e7802d9b3e637990856b744d393113b7e0e17c648a5de5a77"
+    },
+    {
+      "name": "array-all-types",
+      "input": "[null,true,false,0,-1,3.14,\"str\",\"ä\",{\"k\":1},[1,2]]",
+      "canonical": "[null, true, false, 0, -1, 3.14, \"str\", \"ä\", {\"k\": 1}, [1, 2]]",
+      "data_hash": "0582634261c2f8252ce5aaf3fadfbfd5642b13a4a5d5dd638e05bececa9da405"
+    },
+    {
+      "name": "realistic-event",
+      "input": "{\n      \"type\": \"order.placed\",\n      \"id\": \"ORD-00042\",\n      \"ts\": \"2026-06-13T10:00:00.000Z\",\n      \"customer\": { \"name\": \"Renée Müller\", \"country\": \"FI\", \"vip\": true, \"tags\": [\"gold\", \"eu\"] },\n      \"items\": [\n        { \"sku\": \"A-1\", \"qty\": 2, \"price\": 9.95, \"note\": \"fragile — 取扱注意\" },\n        { \"sku\": \"B-2\", \"qty\": 1, \"price\": 100.0, \"gift\": null }\n      ],\n      \"total\": 119.90,\n      \"meta\": { \"source\": \"web\", \"flags\": [], \"nested\": { \"a\": { \"b\": { \"c\": 1 } } } }\n    }",
+      "canonical": "{\"id\": \"ORD-00042\", \"ts\": \"2026-06-13T10:00:00.000Z\", \"meta\": {\"flags\": [], \"nested\": {\"a\": {\"b\": {\"c\": 1}}}, \"source\": \"web\"}, \"type\": \"order.placed\", \"items\": [{\"qty\": 2, \"sku\": \"A-1\", \"note\": \"fragile — 取扱注意\", \"price\": 9.95}, {\"qty\": 1, \"sku\": \"B-2\", \"gift\": null, \"price\": 100.0}], \"total\": 119.90, \"customer\": {\"vip\": true, \"name\": \"Renée Müller\", \"tags\": [\"gold\", \"eu\"], \"country\": \"FI\"}}",
+      "data_hash": "1876187c6841546bc31bd66342b479e8dc613b8a0594872d81049c0e8dd2bb84"
+    },
+    {
+      "name": "deeply-nested",
+      "input": "{\"l1\":{\"l2\":{\"l3\":{\"l4\":{\"l5\":{\"leaf\":[1,2,3]}}}}}}",
+      "canonical": "{\"l1\": {\"l2\": {\"l3\": {\"l4\": {\"l5\": {\"leaf\": [1, 2, 3]}}}}}}",
+      "data_hash": "b7ac61d3f0aee2bf737d2a18b64f8beb0a3c88aea0d3a48d4fd650e1ff38c24b"
+    },
+    {
+      "name": "str-combining-diacritic",
+      "input": "\"e\\u0301\"",
+      "canonical": "\"é\"",
+      "data_hash": "3d68ce21f2899a475713cdbe7562ba9bdb6b1dfde8af1f221bdff4a0935b53b2"
+    },
+    {
+      "name": "str-precomposed-e-acute",
+      "input": "\"é\"",
+      "canonical": "\"é\"",
+      "data_hash": "f2886017e9c7abacf804b54d64787dce2b611c9544ba21f3affdd126a6e50086"
+    },
+    {
+      "name": "str-arabic-rtl",
+      "input": "\"مرحبا بالعالم\"",
+      "canonical": "\"مرحبا بالعالم\"",
+      "data_hash": "8630d08e4a90706f68794a4ef6b6279ccada3fe8c5446b1cf9cc313883ac26f6"
+    },
+    {
+      "name": "str-hebrew-rtl",
+      "input": "\"שלום עולם\"",
+      "canonical": "\"שלום עולם\"",
+      "data_hash": "86650bc5034b7669811dbba352e6d5c7e1547346c2cd0a4b5f3f9d46dd74e33b"
+    },
+    {
+      "name": "str-escaped-quote",
+      "input": "\"\\u0022\"",
+      "canonical": "\"\\\"\"",
+      "data_hash": "0c926fba014b31b506cd4ceb60d646c0c867432650fa0671fcafed6b772614a3"
+    },
+    {
+      "name": "str-escaped-solidus",
+      "input": "\"\\/\"",
+      "canonical": "\"/\"",
+      "data_hash": "df7e940f72aa93cbcb6d70cc35124b0767c7a0e353043c7c24b660ea9be7b952"
+    },
+    {
+      "name": "str-escapes-brf",
+      "input": "\"\\b\\f\\r\"",
+      "canonical": "\"\\b\\f\\r\"",
+      "data_hash": "bce73ba802255a8b2adeebec278f5a9b3e668d57e66b31f76b21e2733e5124d4"
+    },
+    {
+      "name": "num-zero-exp",
+      "input": "0e0",
+      "canonical": "0",
+      "data_hash": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9"
+    },
+    {
+      "name": "num-sci-explicit-plus",
+      "input": "1.5e+2",
+      "canonical": "150",
+      "data_hash": "9ae2bdd7beedc2e766c6b76585530e16925115707dc7a06ab5ee4aa2776b2c7b"
+    },
+    {
+      "name": "num-classic-binary-float",
+      "input": "0.30000000000000004",
+      "canonical": "0.30000000000000004",
+      "data_hash": "06bad31060c1212ae832de4c031f7b31e3b48aed57858294478cb19450cf34ca"
+    },
+    {
+      "name": "num-huge-negative-exp",
+      "input": "1.23e-30",
+      "canonical": "0.00000000000000000000000000000123",
+      "data_hash": "8015e13009142087bf9350b04cb19cceba73b5337d9671316d32510ebe4fba8f"
+    },
+    {
+      "name": "key-empty-string",
+      "input": "{\"\":1,\"a\":2}",
+      "canonical": "{\"\": 1, \"a\": 2}",
+      "data_hash": "e9766c6ae2e3512e9ca75274bd98506d997fcef2cf3e547b1bcd411b6aac66e9"
+    },
+    {
+      "name": "keys-multidigit-order",
+      "input": "{\"k10\":1,\"k2\":2,\"k1\":3,\"k100\":4}",
+      "canonical": "{\"k1\": 3, \"k2\": 2, \"k10\": 1, \"k100\": 4}",
+      "data_hash": "93edec5b9f06e6a95252a7f18191dad7856e09ef84a496b0824e652f64e1f109"
+    },
+    {
+      "name": "nested-empties",
+      "input": "{\"a\":{},\"b\":[],\"c\":[{},[]],\"d\":[[[]]]}",
+      "canonical": "{\"a\": {}, \"b\": [], \"c\": [{}, []], \"d\": [[[]]]}",
+      "data_hash": "f8510102859ce629706390dc855c31c880df66c6347b90b5dc38810dab603822"
+    },
+    {
+      "name": "array-of-objects",
+      "input": "[{\"id\":1,\"v\":\"a\"},{\"id\":2,\"v\":\"ä\"},{\"id\":3,\"v\":null}]",
+      "canonical": "[{\"v\": \"a\", \"id\": 1}, {\"v\": \"ä\", \"id\": 2}, {\"v\": null, \"id\": 3}]",
+      "data_hash": "7577c85345f2b70d178fea27d6c352f4fd8003455125a8d222d7849474a1c8b3"
+    }
+  ]
+}

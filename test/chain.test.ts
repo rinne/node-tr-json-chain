@@ -11,10 +11,9 @@ describe('recordEvent', () => {
     const log = new EventChainLogger(pool, { namespace: 'rec_basic' });
     const a = await log.recordEvent({ kind: 'first', n: 1 });
     const b = await log.recordEvent({ kind: 'second', n: 2 });
-    expect(a).toBeInstanceOf(Buffer);
-    expect(a.length).toBe(32);
-    expect(b.length).toBe(32);
-    expect(a.equals(b)).toBe(false);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(b).toMatch(/^[0-9a-f]{64}$/);
+    expect(a).not.toBe(b);
     expect(await verifyChainInJs(pool, 'rec_basic')).toBe(4); // genesis + root + 2
   });
 
@@ -35,7 +34,7 @@ describe('recordEvent', () => {
     const id = await log.recordEvent(payload);
     const { rows } = await pool.query(
       'SELECT d, ts FROM rec_roundtrip_event_payload WHERE event_id = $1',
-      [id],
+      [Buffer.from(id, 'hex')],
     );
     expect(rows[0].d).toEqual(payload);
     expect(rows[0].ts).toBeInstanceOf(Date);
@@ -46,7 +45,7 @@ describe('recordEvent', () => {
     const id = await log.recordEvent({ secret: true }, { storePayload: false });
     const { rowCount } = await pool.query(
       'SELECT 1 FROM rec_nopayload_event_payload WHERE event_id = $1',
-      [id],
+      [Buffer.from(id, 'hex')],
     );
     expect(rowCount).toBe(0);
     expect(await verifyChainInJs(pool, 'rec_nopayload')).toBe(3);
@@ -66,7 +65,7 @@ describe('recordEvent', () => {
       `SELECT p.d::text AS d_text, c.data_hash
          FROM rec_norm_event_payload p JOIN rec_norm_event_chain c USING (event_id)
         WHERE event_id = $1`,
-      [id],
+      [Buffer.from(id, 'hex')],
     );
     expect(rows[0].d_text).toBe('{"a": 2, "bb": 1}');
     expect(sha256(Buffer.from(rows[0].d_text, 'utf8')).equals(rows[0].data_hash)).toBe(true);
@@ -82,7 +81,7 @@ describe('recordEvent', () => {
     const ids = await Promise.all(
       Array.from({ length: 25 }, (_, i) => log.recordEvent({ i })),
     );
-    expect(new Set(ids.map((b) => b.toString('hex'))).size).toBe(25);
+    expect(new Set(ids).size).toBe(25); // ids are hex strings
     expect(await verifyChainInJs(pool, 'rec_concurrent')).toBe(27); // genesis + root + 25
   });
 });
@@ -93,11 +92,10 @@ describe('timestamp', () => {
     const before = Date.now();
     const id = await log.timestamp();
     const after = Date.now();
-    expect(id).toBeInstanceOf(Buffer);
-    expect(id.length).toBe(32);
+    expect(id).toMatch(/^[0-9a-f]{64}$/);
     const { rows } = await pool.query(
       'SELECT d FROM ts_basic_event_payload WHERE event_id = $1',
-      [id],
+      [Buffer.from(id, 'hex')],
     );
     expect(Object.keys(rows[0].d).sort()).toEqual(['ts', 'type']);
     expect(rows[0].d.type).toBe('ts');
@@ -188,8 +186,8 @@ describe('getRootEvent', () => {
     await log.init();
     const root = await getRoot(pool, 'root_get');
     const got = await log.getRootEvent();
-    expect(got.event_id).toBeInstanceOf(Buffer);
-    expect(got.event_id.equals(root.event_id)).toBe(true);
+    expect(got.id).toBe(1);
+    expect(got.event_id).toBe(root.event_id.toString('hex'));
     expect(got.data).toEqual(root.d);
     expect(typeof (got.data as { chain: string }).chain).toBe('string');
   });
@@ -387,8 +385,8 @@ describe('getChainHead', () => {
     const log = new EventChainLogger(pool, { namespace: 'head_virgin' });
     const head = await log.getChainHead();
     const root = await getRoot(pool, 'head_virgin');
-    expect(head.equals(sha256(root.event_id, ZERO))).toBe(true);
-    expect((await log.getChainHead()).equals(head)).toBe(true); // stable
+    expect(head).toBe(sha256(root.event_id, ZERO).toString('hex'));
+    expect(await log.getChainHead()).toBe(head); // stable
     expect(await verifyChainInJs(pool, 'head_virgin')).toBe(3); // genesis + root + checkpoint
   });
 
@@ -397,15 +395,15 @@ describe('getChainHead', () => {
     const ev = await log.recordEvent({ x: 1 });
     const h1 = await log.getChainHead();
     const h2 = await log.getChainHead();
-    expect(h1.equals(ev)).toBe(false);
-    expect(h1.equals(sha256(ev, ZERO))).toBe(true); // empty event linked to ev
-    expect(h2.equals(h1)).toBe(true); // no pile-up
+    expect(h1).not.toBe(ev);
+    expect(h1).toBe(sha256(Buffer.from(ev, 'hex'), ZERO).toString('hex')); // empty event linked to ev
+    expect(h2).toBe(h1); // no pile-up
     expect(await verifyChainInJs(pool, 'head_stable')).toBe(4); // genesis + root + event + checkpoint
 
     const ev2 = await log.recordEvent({ x: 2 });
     const h3 = await log.getChainHead();
-    expect(h3.equals(h1)).toBe(false);
-    expect(h3.equals(sha256(ev2, ZERO))).toBe(true);
+    expect(h3).not.toBe(h1);
+    expect(h3).toBe(sha256(Buffer.from(ev2, 'hex'), ZERO).toString('hex'));
   });
 });
 
@@ -599,4 +597,53 @@ describe('CSV export/parse (integration)', () => {
     for (const ev of page.events) parser.row(enc.event(ev));
     expect(parser.end().partial).toBe(true);
   });
+});
+
+describe('concurrent writers (stress)', () => {
+  // Ruthless: many *independent* logger instances, each on its own pool (so the
+  // concurrency is real at the database, not just queued on one shared pool),
+  // all opening the SAME chain and bombing it with thousands of events at once —
+  // without pre-initializing, so concurrent lazy init() races too. The chain
+  // must come out single, gapless, and fully verifiable: proof that the
+  // EXCLUSIVE-lock head.id+1 assignment admits no forks, gaps, or duplicate ids.
+  it('stays one gapless, unforked chain under thousands of concurrent appends', async () => {
+    const ns = 'stress_bomb';
+    const LOGGERS = 8;
+    const PER = 500;
+    const TOTAL = LOGGERS * PER; // 4000 recorded events
+
+    const pools = Array.from({ length: LOGGERS }, () => makePool(4));
+    try {
+      // Distinct EventChainLogger instances, all pointed at the same namespace.
+      // No init() up front — every logger lazily initializes concurrently.
+      const loggers = pools.map((p) => new EventChainLogger(p, { namespace: ns }));
+
+      // Fire every write across every logger simultaneously.
+      const tasks: Promise<string>[] = [];
+      for (let i = 0; i < LOGGERS; i++) {
+        for (let j = 0; j < PER; j++) tasks.push(loggers[i].recordEvent({ w: i, j }));
+      }
+      const ids = await Promise.all(tasks);
+
+      // Every append got a distinct event_id (hex) — no fork reused a parent.
+      expect(new Set(ids).size).toBe(TOTAL);
+
+      // The whole chain re-verifies in JS: exactly one genesis, every link sound,
+      // every parent_id == the previous event_id (no surviving forks), and every
+      // stored payload hashes correctly. Returns the total row count.
+      expect(await verifyChainInJs(pool, ns)).toBe(TOTAL + 2); // genesis + root + TOTAL
+
+      // ids are dense and gapless over [0, TOTAL+1]: row count, distinct ids, and
+      // min/max all agree, so head.id+1 never skipped or duplicated a slot even
+      // across rolled-back/contended transactions.
+      const { rows } = await pool.query(
+        `SELECT count(*)::int AS n, count(DISTINCT id)::int AS distinct_ids,
+                min(id)::int AS lo, max(id)::int AS hi
+           FROM ${ns}_event_chain`,
+      );
+      expect(rows[0]).toEqual({ n: TOTAL + 2, distinct_ids: TOTAL + 2, lo: 0, hi: TOTAL + 1 });
+    } finally {
+      await Promise.all(pools.map((p) => p.end()));
+    }
+  }, 120_000); // generous: thousands of appends serialize on the exclusive lock
 });

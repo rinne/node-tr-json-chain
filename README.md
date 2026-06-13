@@ -28,10 +28,10 @@ const log = new EventChainLogger(pool);
 
 // Schema is ensured automatically on first use (or call log.init() eagerly).
 const eventId = await log.recordEvent({ type: 'user.login', user: 42 });
-console.log('event id:', eventId.toString('hex'));
+console.log('event id:', eventId); // a 64-char hex string
 
 const head = await log.getChainHead();
-console.log('chain head:', head.toString('hex'));
+console.log('chain head:', head); // hex
 ```
 
 TypeScript types are included:
@@ -146,9 +146,16 @@ any number of processes can start concurrently. You don't have to call it —
 at startup surfaces configuration problems early. A failed `init()` may be
 retried (e.g. after fixing the database).
 
-### `recordEvent(data, options?): Promise<Buffer>`
+> **All identifiers and hashes returned by this API are lowercase hex strings**
+> (`event_id`, `parent_id`, `data_hash` — 64 hex chars), never `Buffer`s. Every
+> accessor that returns an *event* returns the same shape, the
+> [`ChainEventDetail`](#getevents) below.
 
-Appends an event and resolves to its 32-byte `event_id`.
+### `recordEvent(data, options?): Promise<string | ChainEventDetail>`
+
+Appends an event. By default resolves to the new event's `event_id` as a hex
+string; with `returnFullEventData: true` it resolves to the full
+[`ChainEventDetail`](#getevents) instead.
 
 - `data` — any JSON-serializable value (object, array, string, number,
   boolean, or `null`). `undefined` and functions throw `TypeError`.
@@ -156,41 +163,62 @@ Appends an event and resolves to its 32-byte `event_id`.
   stored; the payload itself is discarded. The hash still commits to the
   payload, so you can later prove that a payload you retained out-of-band was
   recorded, without keeping it in the database. Default `true`.
+- `options.returnFullEventData` — when `true`, resolve to the full event object
+  (all fields populated, including the canonical `hashed_data`). This is the
+  **only** way to obtain `hashed_data` for an event recorded with
+  `storePayload: false`: record time is the only moment that canonical text
+  exists (no payload row is kept), and it cannot be reproduced off-server — so
+  retain it then if you want to prove the content later. Default `false`.
 
-### `timestamp(): Promise<Buffer>`
+### `timestamp(options?): Promise<string | ChainEventDetail>`
 
-Convenience shortcut that records the current time as an event and resolves to
-its 32-byte `event_id`:
+Convenience shortcut that records the current time as an event:
 
 ```json
 { "type": "ts", "ts": "YYYY-MM-DDThh:mm:ss.mmmZ" }
 ```
 
-Equivalent to `recordEvent({ type: 'ts', ts: new Date().toISOString() })`.
+Equivalent to `recordEvent({ type: 'ts', ts: new Date().toISOString() }, options)`
+— same return contract (hex string, or the full object with `returnFullEventData`).
 
-### `getChainHead(): Promise<Buffer>`
+### `getChainHead(): Promise<string>`
 
-Resolves to the 32-byte `event_id` of the chain head. If the current head is
-not already an *empty checkpoint event* (one with a zero `data_hash`), one is
+Resolves to the `event_id` (hex) of the chain head. If the current head is not
+already an *empty checkpoint event* (one with a zero `data_hash`), one is
 appended first. Repeated calls therefore return the same id instead of piling
-up empty events.
+up empty events — so a head fetch is itself an auditable act: the returned id
+commits to everything recorded before it. For a **read-only** peek at the
+current tip (no checkpoint appended), use [`getEvent(-1)`](#geteventid-options).
 
-This makes a head fetch itself an auditable act: the returned id commits to
-everything recorded before it.
+### `getEvent(id, options?): Promise<ChainEventDetail | null>`
 
-### `getRootEvent(): Promise<{ event_id, data? }>`
+Returns a single event by its `id` (chain position) as a
+[`ChainEventDetail`](#getevents), or `null` if no such event exists. A thin
+wrapper over `getEvents` with `slice`-style indexing, so negatives count from
+the end: `getEvent(-1)` is the last event (a non-mutating head peek),
+`getEvent(0)` the genesis row, `getEvent(1)` the root. `options` are the same
+`include*` flags as `getEvents`. Does **not** initialize the chain (throws
+`ChainNotInitializedError` if uninitialized).
 
-Resolves to the chain's **root event** — the first event after genesis, which
-carries the chain's identity:
+### `getRootEvent(options?): Promise<ChainEventDetail>`
 
-```js
-{ event_id: <Buffer>, data: { chain: '…', ts: '…' /* … */ } }
-```
+Returns the chain's **root event** (the first event after genesis, carrying the
+chain's identity) as a [`ChainEventDetail`](#getevents) — equivalent to
+`getEvent(1, options)`, but it stays a "give me the root or fail" accessor:
+it throws `ChainNotInitializedError` when no root exists (tables absent, or only
+the genesis row). Does **not** initialize the chain.
 
-`data` (the stored JSONB payload) is **omitted** when no payload was kept for
-the root event. Unlike the other accessors this does **not** initialize the
-chain: it reads existing state and throws an `Error` if the chain is
-uninitialized (tables absent, or no root event recorded yet).
+### `verify(options?): Promise<VerifyResult>`
+
+Verifies chain integrity server-side, on demand — the same check `init()` runs:
+the root-event canary by default, or the **entire chain** with `{ full: true }`.
+Resolves to `{ ok, mode: 'root'|'full', eventsChecked, firstBadId?, offending? }`.
+
+- On an integrity mismatch it **throws** `ChainVerificationError` by default;
+  pass `{ throwOnMismatch: false }` to instead resolve to `{ ok: false, … }` so
+  audit/monitoring callers can branch on the result.
+- Operational failures always throw regardless: `ChainNotInitializedError` if the
+  chain doesn't exist, plus `sha256()`-support / connection errors.
 
 ### `getEvents(start?, end?, options?): Promise<{ events, start, end, have_more }>`
 
@@ -200,7 +228,7 @@ Returns a page of events addressed by `Array.prototype.slice` semantics, where
 
 ```js
 const { events, start, end, have_more } = await log.getEvents(0, 100);
-// events: [ { event_id: '<hex>', data?: {…} }, … ]
+// events: [ { id, event_id: '<hex>', data?: {…} }, … ]   (the ChainEventDetail shape)
 // start/end: index (= id) of the first/last returned event
 // have_more: true if the requested range holds more than was returned
 ```
@@ -232,15 +260,23 @@ const { events, start, end, have_more } = await log.getEvents(0, 100);
   - `includeHashedData` → `hashed_data`, the `jsonb::text` whose UTF-8 bytes
     were hashed into `data_hash` (omitted when no payload was stored);
   - `maxEvents` → a smaller per-call cap (positive integer; `> 1000` ignored).
-- Like `getRootEvent`, this does **not** initialize the chain; it throws if the
-  chain is uninitialized.
+- Like `getRootEvent`, this does **not** initialize the chain; it throws
+  `ChainNotInitializedError` if the chain is uninitialized.
+
+This `{ id, event_id, data?, hashed_data?, data_hash?, parent_id? }` object is
+the **`ChainEventDetail`** shape returned by every event accessor (`getEvents`,
+`getEvent`, `getRootEvent`, and `recordEvent`/`timestamp` with
+`returnFullEventData`). `id`/`event_id` are always present; the rest appear when
+available/requested. `data` is the **normalized** payload (what `jsonb` parsed
+back to), so the same event has the same `data` from any accessor.
 
 ### Errors
 
 | class | thrown when |
 |---|---|
 | `SchemaMismatchError` | a pre-existing table doesn't match the frozen shape (nothing is touched) |
-| `ChainVerificationError` | the root event fails hash re-verification at init (tampering, or an incompatible server) |
+| `ChainVerificationError` | hash re-verification fails at `init()` or `verify()` (tampering, or an incompatible server) |
+| `ChainNotInitializedError` | a read accessor (`getEvents` / `getEvent` / `getRootEvent` / `verify`) is used before the chain exists |
 | `UnsupportedPostgresError` | the server lacks built-in `sha256()` (PostgreSQL < 11) |
 | `TypeError` | invalid namespace or non-JSON-serializable event data |
 
@@ -446,8 +482,16 @@ linked structure verifies forever. Re-verifying *payloads*, however, depends
 on `jsonb::text` rendering being identical to when the payload was hashed.
 That rendering has been byte-stable since PostgreSQL 9.4 and is de facto
 frozen (changing it would break dumps and replication ecosystem-wide), but it
-is not formally guaranteed. As insurance, every `init()` runs a **canary
-check**: it re-hashes the chain's root event server-side using the exact
+is not formally guaranteed.
+
+**Cross-version compatibility is verified, not assumed.** A committed corpus of
+adversarial JSON payloads (key ordering, duplicate keys, number formats, Unicode
+escapes and normalization, emoji, RTL scripts, …) is hashed and checked to render
+**byte-identically across every supported PostgreSQL major version, 11 through
+18** — so a chain recorded on one of these and re-verified on another reproduces
+the exact same `data_hash` and `event_id`. As further insurance, every `init()`
+runs a **canary check**: it re-hashes the chain's root event server-side using
+the exact
 expressions `event_record()` uses. If a server ever rendered or hashed JSONB
 incompatibly — or the root event was tampered with — connecting fails loudly
 with `ChainVerificationError` instead of the chain silently becoming

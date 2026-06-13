@@ -38,6 +38,33 @@ export class ChainVerificationError extends Error {
   }
 }
 
+/**
+ * Thrown by the read accessors (`getEvents`, `getEvent`, `getRootEvent`,
+ * `verify`) when the chain has not been initialized — the tables do not exist,
+ * or (for `getRootEvent`) no root event has been recorded yet. These accessors
+ * deliberately do not create the schema; call `init()` (or any write) first.
+ */
+export class ChainNotInitializedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChainNotInitializedError';
+  }
+}
+
+/** Result of an integrity check (see {@link runChainCheck} / `EventChainLogger.verify`). */
+export interface VerifyResult {
+  /** True when no integrity problem was found. */
+  ok: boolean;
+  /** Which check ran: the root-event canary, or the whole chain. */
+  mode: 'root' | 'full';
+  /** How many events the check examined (root: 0 or 1; full: the chain length). */
+  eventsChecked: number;
+  /** The `id` of the first offending event, when `ok` is false. */
+  firstBadId?: number;
+  /** The offending events (capped), with the failed checks, when `ok` is false. */
+  offending?: { id: number; reasons: string[] }[];
+}
+
 const NAMESPACE_RE = /^[a-z][a-z0-9_]*$/;
 
 // Longest generated identifier suffix is "event_chain_one_genesis" (23 chars);
@@ -247,57 +274,80 @@ async function ensureRootEvent(
   );
 }
 
-/**
- * Canary check, run on every init after the root event exists: re-hashes the
- * root event server-side with the very expressions event_record() uses.
- *
- * Chain *links* are immune to server upgrades (they hash stored bytes), but
- * re-verifying a *payload* depends on jsonb::text rendering being stable
- * across PostgreSQL versions. That rendering has been byte-stable since 9.4
- * and is de facto frozen, but is not formally guaranteed — so this proves,
- * cheaply and on every connect, that the current server still renders and
- * hashes JSONB exactly as the server that recorded the root event did. It
- * also detects tampering with the root event itself.
- */
-async function verifyRootEvent(client: PoolClient, prefix: string): Promise<void> {
-  const res = await client.query(
-    `SELECT (c.data_hash = sha256(convert_to(p.d::text, 'UTF8'))) AS payload_ok,
-            (c.event_id = sha256(c.parent_id || c.data_hash)) AS link_ok
-       FROM ${prefix}event_chain c JOIN ${prefix}event_payload p USING (event_id)
-      WHERE c.parent_id = $1`,
-    [ZERO_HASH],
-  );
-  if (res.rowCount === 0) return; // pre-root-event chain, or payload not stored
-  const { payload_ok, link_ok } = res.rows[0];
-  if (!payload_ok || !link_ok) {
-    throw new ChainVerificationError(
-      `root event of "${prefix}event_chain" fails hash re-verification ` +
-        `(payload hash ${payload_ok ? 'ok' : 'MISMATCH'}, ` +
-        `chain link ${link_ok ? 'ok' : 'MISMATCH'}): either the chain data ` +
-        'was tampered with, or this PostgreSQL server hashes JSONB ' +
-        'incompatibly with the one that recorded the chain',
-    );
+// Minimal queryable shared by a Pool and a PoolClient — so the checks below run
+// both inside init's transaction (client) and standalone for verify() (pool).
+type Queryable = Pick<Pool, 'query'>;
+
+const FULL_CHAIN_OFFENDING_LIMIT = 5;
+
+/** Maps a pg "undefined_table" (42P01) into ChainNotInitializedError. */
+function asNotInitialized(err: unknown): never {
+  if ((err as { code?: string }).code === '42P01') {
+    throw new ChainNotInitializedError('chain is not initialized (tables do not exist)');
   }
+  throw err;
 }
 
 /**
- * Full-chain canary: re-hashes and re-links *every* event server-side in one
- * statement, instead of only the root event (see {@link verifyRootEvent}).
+ * Root-event canary: re-hashes the root event server-side with the very
+ * expressions event_record() uses, returning a structured {@link VerifyResult}.
  *
- * For each row it checks, exactly as the recorder computes them:
- *   - data_hash = sha256(convert_to(d::text, 'UTF8'))  — only where a payload
- *     is stored (events without a payload keep a data_hash we can't recompute,
- *     so they are skipped here but still bound by the event_id check);
+ * Chain *links* are immune to server upgrades (they hash stored bytes), but
+ * re-verifying a *payload* depends on jsonb::text rendering being stable across
+ * PostgreSQL versions — byte-stable since 9.4 and de facto frozen, but not
+ * formally guaranteed. This proves, cheaply, that the current server still
+ * renders and hashes JSONB exactly as the recorder did, and detects tampering.
+ */
+async function runRootCheck(q: Queryable, prefix: string): Promise<VerifyResult> {
+  let res;
+  try {
+    res = await q.query(
+      `SELECT c.id,
+              (c.data_hash = sha256(convert_to(p.d::text, 'UTF8'))) AS payload_ok,
+              (c.event_id = sha256(c.parent_id || c.data_hash)) AS link_ok
+         FROM ${prefix}event_chain c JOIN ${prefix}event_payload p USING (event_id)
+        WHERE c.parent_id = $1`,
+      [ZERO_HASH],
+    );
+  } catch (err) {
+    asNotInitialized(err);
+  }
+  if (res.rowCount === 0) {
+    return { ok: true, mode: 'root', eventsChecked: 0 }; // no root payload to check
+  }
+  const row = res.rows[0];
+  if (row.payload_ok && row.link_ok) {
+    return { ok: true, mode: 'root', eventsChecked: 1 };
+  }
+  const reasons: string[] = [];
+  if (!row.payload_ok) reasons.push('data_hash');
+  if (!row.link_ok) reasons.push('event_id');
+  const id = Number(row.id);
+  return { ok: false, mode: 'root', eventsChecked: 1, firstBadId: id, offending: [{ id, reasons }] };
+}
+
+/**
+ * Full-chain check: re-hashes and re-links *every* event server-side in one
+ * statement (instead of only the root). For each row, exactly as the recorder
+ * computes them:
+ *   - data_hash = sha256(convert_to(d::text, 'UTF8'))  — only where a payload is
+ *     stored (payload-less events keep a data_hash we can't recompute, so they
+ *     are skipped here but still bound by the event_id check);
  *   - event_id  = sha256(parent_id || data_hash), since parent_id already *is*
  *     the parent's event_id (FK-enforced) — no self-join needed;
  *   - the genesis row (parent_id IS NULL) has all-zero event_id and data_hash.
  *
- * The query returns only offending rows; an empty result means the whole chain
- * verifies. Stronger but heavier than the root-only canary — opt in via the
- * `verifyChain` option when you want every init to re-prove the entire chain.
+ * Heavier than the root-only check (scales with chain length).
  */
-async function verifyFullChain(client: PoolClient, prefix: string): Promise<void> {
-  const res = await client.query(
+async function runFullCheck(q: Queryable, prefix: string): Promise<VerifyResult> {
+  let lenRes;
+  try {
+    lenRes = await q.query(`SELECT count(*)::int AS n FROM ${prefix}event_chain`);
+  } catch (err) {
+    asNotInitialized(err);
+  }
+  const eventsChecked = Number(lenRes.rows[0]?.n ?? 0);
+  const res = await q.query(
     `SELECT v.id, v.bad_data_hash, v.bad_event_id
        FROM (
          SELECT e.id,
@@ -313,23 +363,42 @@ async function verifyFullChain(client: PoolClient, prefix: string): Promise<void
        ) v
       WHERE v.bad_data_hash OR v.bad_event_id
       ORDER BY v.id
-      LIMIT 5`,
+      LIMIT ${FULL_CHAIN_OFFENDING_LIMIT}`,
     [ZERO_HASH],
   );
-  if (res.rows.length === 0) return; // whole chain verifies
-  const detail = res.rows
-    .map((r) => {
-      const reasons = [];
-      if (r.bad_data_hash) reasons.push('data_hash');
-      if (r.bad_event_id) reasons.push('event_id');
-      return `id ${r.id} (${reasons.join('+')})`;
-    })
+  if (res.rows.length === 0) return { ok: true, mode: 'full', eventsChecked };
+  const offending = res.rows.map((r) => {
+    const reasons: string[] = [];
+    if (r.bad_data_hash) reasons.push('data_hash');
+    if (r.bad_event_id) reasons.push('event_id');
+    return { id: Number(r.id), reasons };
+  });
+  return { ok: false, mode: 'full', eventsChecked, firstBadId: offending[0]?.id, offending };
+}
+
+/**
+ * Runs the integrity check for `prefix`: the root-event canary, or the whole
+ * chain when `full`. Returns a structured {@link VerifyResult} (does not throw
+ * on a mismatch — the caller decides). Throws {@link ChainNotInitializedError}
+ * if the chain tables do not exist.
+ */
+export function runChainCheck(q: Queryable, prefix: string, full: boolean): Promise<VerifyResult> {
+  return full ? runFullCheck(q, prefix) : runRootCheck(q, prefix);
+}
+
+/** Builds the human-readable message for a failed {@link VerifyResult}. */
+export function chainVerificationMessage(prefix: string, result: VerifyResult): string {
+  const detail = (result.offending ?? [])
+    .map((o) => `id ${o.id} (${o.reasons.join('+')})`)
     .join(', ');
-  throw new ChainVerificationError(
-    `chain verification failed for "${prefix}event_chain" at ${detail}` +
-      (res.rows.length === 5 ? ' (and possibly more)' : '') +
-      ': either the chain was tampered with, or this PostgreSQL server hashes ' +
-      'JSONB incompatibly with the one that recorded the chain',
+  const more =
+    result.mode === 'full' && (result.offending?.length ?? 0) === FULL_CHAIN_OFFENDING_LIMIT
+      ? ' (and possibly more)'
+      : '';
+  return (
+    `chain verification failed for "${prefix}event_chain" at ${detail}${more}: ` +
+    'either the chain was tampered with, or this PostgreSQL server hashes ' +
+    'JSONB incompatibly with the one that recorded the chain'
   );
 }
 
@@ -364,10 +433,9 @@ export async function ensureSchema(
     await verifyGenesis(client, prefix);
     await client.query(expand(FUNCTIONS_SQL, prefix));
     await ensureRootEvent(client, prefix, rootEventOptions);
-    if (verifyChain) {
-      await verifyFullChain(client, prefix);
-    } else {
-      await verifyRootEvent(client, prefix);
+    const result = await runChainCheck(client, prefix, verifyChain);
+    if (!result.ok) {
+      throw new ChainVerificationError(chainVerificationMessage(prefix, result));
     }
     await client.query('COMMIT');
   } catch (err) {
