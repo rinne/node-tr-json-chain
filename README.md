@@ -15,7 +15,9 @@ npm install tr-json-chain pg
 ```
 
 Requires Node.js ≥ 18 and PostgreSQL ≥ 11 (for the built-in `sha256()`
-function). No extensions needed.
+function), on a **UTF-8 database** (`ENCODING 'UTF8'`, the default). No
+extensions needed. The canonical-payload bytes are byte-verified identical
+across PostgreSQL 11–18.
 
 ## Quick start
 
@@ -319,18 +321,18 @@ Validation is strict because the namespace becomes part of SQL identifiers.
 
 ## The never-migrate guarantee
 
-The chain tables' DDL is **frozen** (binding from `1.0.0` — see
-[Versioning and compatibility](#versioning-and-compatibility); the `0.x` series
-is still finalizing the shape). New versions of this module may replace the
-stored functions, but will never `ALTER`, `DROP`, or otherwise migrate
-`event_chain` / `event_payload`, and will never change how `event_id` or
-`data_hash` are computed. On every `init()` the module *verifies* existing
-tables and refuses to proceed on any mismatch — it has no code path that
-modifies an existing table.
+The chain tables' DDL is **frozen** as of `1.0.0`. New versions of this module
+may replace the stored functions, but will never `ALTER`, `DROP`, or otherwise
+migrate `event_chain` / `event_payload`, and will never change how `event_id` or
+`data_hash` are computed. On every `init()` the module *verifies* existing tables
+and refuses to proceed on any mismatch — it has no code path that modifies an
+existing table.
 
 This is what makes the chain trustworthy long-term: a chain recorded today
-remains verifiable, byte for byte, against any future version of this module
-(see the compatibility policy below for when this guarantee becomes binding).
+remains verifiable, byte for byte, against any future version of this module.
+
+> The complete, frozen on-disk format and hash specification lives in
+> [`FORMAT.md`](FORMAT.md) — the authoritative reference for re-implementers.
 
 ## Versioning and compatibility
 
@@ -341,23 +343,20 @@ and extended by another.
 - **Chain integrity is preserved across every version.** The hashing rules
   (`event_id` / `data_hash`) and the linked-list structure never change, so a
   chain is always internally verifiable regardless of which version wrote it.
-- **Pre-1.0.0 (the current `0.x` series): the on-disk shape is not yet frozen.**
-  Breaking changes to the table layout may still land between `0.x` releases as
-  the design is finalized, and a newer `0.x` may refuse to open a chain created
-  by an older one. In particular:
-  - **`0.4.0` is not compatible with chains created by `0.1.0`–`0.3.0`.** The
-    `event_chain.id` column changed from a serial (starting at 1) to a
-    caller-assigned, dense, 0-based position (genesis `id 0`). `init()` rejects
-    a pre-`0.4.0` chain with a `SchemaMismatchError`. There is no in-place
-    migration; integrity of the old chain is unaffected, but you must start a
-    new chain (or namespace) to use `0.4.0+`.
-- **From 1.0.0 onward, backward compatibility is guaranteed and stated
-  explicitly.** Once `1.0.0` ships, the on-disk shape is frozen (this is when
-  the [never-migrate guarantee](#the-never-migrate-guarantee) becomes binding),
-  and every later release will be able to open any chain back to `1.0.0`. When
-  a future major version changes something, the README will say exactly how far
-  back compatibility reaches — e.g. at `2.0.0`, *"chains are fully backward
-  compatible down to 1.0.0."*
+- **The on-disk shape is frozen as of `1.0.0`.** The
+  [never-migrate guarantee](#the-never-migrate-guarantee) is in force: every
+  release from `1.0.0` onward opens any chain back to `1.0.0`, byte for byte.
+  When a future major version changes something *additive*, the README will say
+  exactly how far back compatibility reaches — e.g. at `2.0.0`, *"chains are
+  fully backward compatible down to 1.0.0."*
+- **History (the `0.x` series finalized the shape).** Before `1.0.0` the layout
+  was still being settled, so some `0.x` releases reject chains from an older
+  one. In particular: **`0.4.0` is not compatible with chains created by
+  `0.1.0`–`0.3.0`** — `event_chain.id` changed from a serial (starting at 1) to
+  the caller-assigned, dense, 0-based position (genesis `id 0`) used ever since;
+  `init()` rejects a pre-`0.4.0` chain with a `SchemaMismatchError`. The old
+  chain's integrity is unaffected, but you must start a new chain (or namespace)
+  to use `0.4.0+`. There are no such breaks from `1.0.0` onward.
 
 ## Hash specification (for independent verifiers)
 
@@ -402,6 +401,15 @@ trick that keeps independent verification trivial and stable.
 > ⚠ Only event *creation* (or re-deriving a payload's hash from a parsed object)
 > depends on matching PostgreSQL's normalization. *Verification from an export
 > that includes `hashed_data`* does not — never hash your own re-serialization.
+
+**The thing of record is the canonical text, not any object.** The hash commits
+to the `hashed_data` bytes; how a producer's in-memory value became JSON (and how
+a consumer re-parses those bytes back into an object) is outside the guarantee
+and can be lossy in either language — e.g. a JSON integer beyond 2⁵³ re-parses to
+a different `number` in JavaScript. Consumers that need exactness use
+`hashed_data` (the text), never a re-parsed object. If you need an exact large
+integer or decimal preserved, encode it as a JSON **string**. See
+[`FORMAT.md` §4](FORMAT.md) for the full trust boundary and number caveats.
 
 ### Reference export (one self-describing record per event)
 

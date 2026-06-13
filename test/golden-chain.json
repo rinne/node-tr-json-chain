@@ -1,0 +1,44 @@
+{
+  "_comment": "Invariants for the golden chain fixture. Generated on PostgreSQL 16 via scripts/gen-golden-chain.mjs from golden-chain-input.json. Every value is a literal expectation checked by golden-chain.test.ts — a change to any hash means the on-disk format / rendering moved and must be investigated.",
+  "generatedOnServerVersion": "16.14 (Debian 16.14-1.pgdg13+1)",
+  "length": 7,
+  "genesisEventId": "0000000000000000000000000000000000000000000000000000000000000000",
+  "headEventId": "ead42777bb244c26566df6942f6ac760ad778bb912811cfdc54a0141aa92cddb",
+  "rows": [
+    {
+      "id": 0,
+      "event_id": "0000000000000000000000000000000000000000000000000000000000000000",
+      "data_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "id": 1,
+      "event_id": "a60d043a388a0c3a4a3600ad805af74ca253054e915b57ccf2e27f5afc02f778",
+      "data_hash": "af0e2423c37f639df1015b5a61c1119e74cc42bb925278814386c27a6825ee90"
+    },
+    {
+      "id": 2,
+      "event_id": "6acb0260084276b671781c12cbd179eae3f9754cc67f29ede1ac6088ec61a8af",
+      "data_hash": "9c9fc4c9e3731adbeffa222934e0852bde1a9eeea90158014c681381affb4883"
+    },
+    {
+      "id": 3,
+      "event_id": "70db8edf79f7be7c535b060d169f1d5c4b54237aed9143b88cff0cebea81dcfa",
+      "data_hash": "bff958a6d691ebb655f9090e778dbb7e6633da931852b61d36b44a35d5368595"
+    },
+    {
+      "id": 4,
+      "event_id": "ef627d86aad34bdd6da4ac881ee4402e0038a080e6689bca71edab476e602561",
+      "data_hash": "b15d8a550a109999d2b8be79359a12a3470192e4da8065c1bd57ac945bfd9d26"
+    },
+    {
+      "id": 5,
+      "event_id": "5234ba8741ee9a058d1874099c25f9fac6d8ce80c153ab8be1649df31d269cd6",
+      "data_hash": "f3eb6a700654d53d4e3bc1fbab70545850bf143bb472fc52747a31d5fc523321"
+    },
+    {
+      "id": 6,
+      "event_id": "ead42777bb244c26566df6942f6ac760ad778bb912811cfdc54a0141aa92cddb",
+      "data_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

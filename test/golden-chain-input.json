@@ -1,0 +1,40 @@
+{
+  "_comment": "Deterministic recipe for the golden chain fixture. The SINGLE SOURCE of the fixture's inputs: scripts/gen-golden-chain.mjs builds it and writes golden-chain.csv / golden-chain.json; golden-chain.test.ts rebuilds it and asserts byte-identical reproduction. All values are fixed (no random UUID, no timestamps) so the resulting hashes are reproducible forever and across PostgreSQL versions. Payloads are JS-safe (no >2^53 ints / lossy decimals — those exotic renderings are covered by jsonb-vectors.json); here the point is a representative real recording path: payloads, a no-payload event, key reordering, CSV-hostile text, and an empty checkpoint.",
+  "namespace": "golden",
+  "rootOmitDefaultData": true,
+  "rootExtraData": {
+    "type": "chain-root",
+    "chain": "golden-fixture-0001",
+    "spec": "tr-json-chain FORMAT.md",
+    "v": 1
+  },
+  "events": [
+    {
+      "store": true,
+      "data": {
+        "type": "order.placed",
+        "id": "ORD-42",
+        "note": "semi;colon \"quotes\" and unicode ä€漢🎉",
+        "qty": 3,
+        "vip": true
+      }
+    },
+    {
+      "store": true,
+      "data": {
+        "type": "nested",
+        "a": { "b": { "c": [1, 2, { "d": null }] } },
+        "list": ["x", "ä", false, 2.5]
+      }
+    },
+    {
+      "store": false,
+      "data": { "type": "redacted", "secret": "not stored on disk" }
+    },
+    {
+      "store": true,
+      "data": { "bb": 1, "a": 2, "z": 3 }
+    },
+    { "checkpoint": true }
+  ]
+}
