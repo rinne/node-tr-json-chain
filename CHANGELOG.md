@@ -4,6 +4,32 @@ All notable changes to `tr-json-chain` are documented here. This project follows
 [semantic versioning](https://semver.org/); the compatibility promise is about
 the **on-disk chain** (see the README's "Versioning and compatibility").
 
+## 1.0.1
+
+**Purely additive — zero changes to the existing API, and nothing touching the
+chain format.** `EventChainLogger` and every existing accessor, option, return
+shape, error, and hash are **byte-for-byte unchanged** from `1.0.0`. This release
+only *adds* supplementary, **fully independent** functionality that lives entirely
+outside the main class; existing code and existing chains are completely unaffected.
+
+- **New `EventChainScheduler`** (separately importable, like the CSV classes) — an
+  optional helper that drives an `EventChainLogger` to record periodic `ts` and
+  `seal` events on independent timers. It only calls the logger's existing public
+  write API; it does not extend, subclass, or alter it. Depends solely on
+  `node:crypto` (no new runtime dependency). Includes
+  `EventChainScheduler.generateSealKeyPair()` and the new `SchedulerEndedError` /
+  `SealPrecheckError` error types.
+- **New `CANONICAL-EVENTS.md`** (shipped in the package) — documents the *optional*
+  canonical event vocabulary (`chain-root`, `ts`, `seal`) and the type-namespacing
+  convention. Explicitly **not** part of chain integrity: a chain can be created and
+  verified while ignoring it entirely.
+- **`seal` events & the root `sealKey`** are a convention layer only — an externally
+  signed (JWT/JWS) attestation of a recent chain position. They add no on-disk
+  format, no schema, and no change to hashing; a chain with no `sealKey` simply has
+  no seals.
+
+Nothing here changes the frozen format guarantee established in `1.0.0`.
+
 ## 1.0.0
 
 **The on-disk format is now frozen.** This release contains **no change to the

@@ -21,3 +21,13 @@ export {
   type ParsedRow,
   type CsvParseSummary,
 } from './csv';
+export {
+  EventChainScheduler,
+  SchedulerEndedError,
+  SealPrecheckError,
+  type SealAlgorithm,
+  type ScheduleHandle,
+  type SealKeyPair,
+  type GenerateSealKeyPairOptions,
+  type EventChainSchedulerOptions,
+} from './scheduler';

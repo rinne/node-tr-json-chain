@@ -281,6 +281,8 @@ back to), so the same event has the same `data` from any accessor.
 | `ChainNotInitializedError` | a read accessor (`getEvents` / `getEvent` / `getRootEvent` / `verify`) is used before the chain exists |
 | `UnsupportedPostgresError` | the server lacks built-in `sha256()` (PostgreSQL < 11) |
 | `TypeError` | invalid namespace or non-JSON-serializable event data |
+| `SealPrecheckError` | (`EventChainScheduler`) a seal's signing key doesn't match the chain-root `sealKey` |
+| `SchedulerEndedError` | (`EventChainScheduler`) any method called after `end()` |
 
 ## Event `type` convention
 
@@ -302,6 +304,116 @@ The two events the library generates itself follow it:
 This is only a convention — nothing in the chain enforces or depends on it, and
 you can drop it from the root event with `rootOmitDefaultData`. (`ts`, an ISO
 8601 UTC timestamp, is the companion convention for an event's own time.)
+
+The optional, growing vocabulary of well-known event shapes (`chain-root`, `ts`,
+`seal`) and the `type`-namespacing convention are documented in
+[`CANONICAL-EVENTS.md`](CANONICAL-EVENTS.md). None of it affects chain integrity —
+a chain can be created and verified while ignoring it entirely.
+
+## Periodic events: `EventChainScheduler`
+
+`EventChainScheduler` is an **optional, separately-importable** helper (like the
+CSV classes) that drives an `EventChainLogger` to record periodic events on
+independent timers. It is fully independent of the main class — it only calls the
+logger's existing public write API and changes nothing about the chain format. Its
+sole dependency is `node:crypto`.
+
+It records two canonical event kinds:
+
+- **`timestamp`** — a `{ "type": "ts", "ts": … }` heartbeat (via `logger.timestamp()`).
+- **`seal`** — a `{ "type": "seal", "ts": …, "sealed-head": …, "seal": <JWT> }`
+  event: an externally-signed (JWT/JWS) attestation that a recent chain position
+  was reached by the holder of the seal's **private** key. The matching **public**
+  key is published in the chain-root `sealKey`. Seals let a consumer distinguish a
+  chain's authentic prefix from anything appended later or on a fork. See
+  [`CANONICAL-EVENTS.md`](CANONICAL-EVENTS.md#seal) for the full seal specification.
+
+```js
+const { EventChainLogger, EventChainScheduler } = require('tr-json-chain');
+
+// One-time, offline: mint a seal key pair.
+const { publicKey, secretKey } =
+  EventChainScheduler.generateSealKeyPair('ES256', { kid: 'seal-2026' });
+
+// Publish the PUBLIC key in the chain-root at creation time:
+const log = new EventChainLogger(pool, { rootExtraData: { sealKey: publicKey } });
+
+// In a long-running process: heartbeat every minute, seal every hour.
+const sched = new EventChainScheduler(log, {
+  onError: (err, handle) => console.error('scheduler error', err),
+});
+sched.on('seal',      ({ sealedHead }) => console.log('sealed', sealedHead));
+sched.on('timestamp', ({ eventId })   => console.log('ts', eventId));
+
+const tsHandle   = sched.scheduleTimestamp(60);
+const sealHandle = sched.scheduleSeal(secretKey, 3600); // keep `secretKey` secret
+
+process.on('SIGTERM', () => sched.end());
+```
+
+### `new EventChainScheduler(logger, options?)`
+
+Wraps a live `EventChainLogger`. The constructor performs no database access; the
+chain is touched lazily on the first tick. Extends Node's `EventEmitter`.
+
+`options`:
+
+| option | meaning |
+|---|---|
+| `onError(err, handle?)` | convenience `'error'` listener (same as `scheduler.on('error', …)`) |
+| `clock()` | epoch-ms clock; defaults to `Date.now` (for deterministic tests) |
+| `setTimer(fn, ms)` / `clearTimer(token)` | timer hooks; default to `setTimeout`/`clearTimeout` (the defaults `unref()` their timers, so a scheduler never keeps a process alive on its own) |
+
+Emitted events:
+
+| event | payload | when |
+|---|---|---|
+| `'seal'` | `{ handle, eventId, sealedHead }` | a `seal` event was recorded |
+| `'timestamp'` | `{ handle, eventId }` | a `ts` event was recorded |
+| `'error'` | `(error, handle?)` | a tick failed (standard `EventEmitter` semantics — attach a listener or `onError`) |
+
+### `scheduleSeal(secretKey, intervalSeconds): handle`
+
+Records a `seal` every `intervalSeconds`. `secretKey` is a **private JWK** (e.g.
+the `secretKey` from `generateSealKeyPair`); its `alg` selects the algorithm and
+its `kid`, if present, goes into the JWT header. Returns an opaque handle.
+
+On the **first** tick the scheduler verifies the chain-root's public `sealKey`
+against the signing key — the **public key itself must match** (its `kid`/`alg`
+are checked only if present in the root key). On mismatch (or if the root has no
+usable `sealKey`/`chain`) it emits a `SealPrecheckError` via `'error'` and
+**auto-unschedules that seal**, so it never mints unverifiable seals.
+
+### `scheduleTimestamp(intervalSeconds): handle`
+
+Records a `ts` event every `intervalSeconds` (via `logger.timestamp()`). Returns
+an opaque handle.
+
+> **Cadence.** The first tick of a schedule fires after a short randomized delay
+> (1–2 s). Thereafter the next tick is armed only once the current one completes,
+> at `start + intervalSeconds`, but never sooner than 1 s after completion — so
+> ticks of one schedule never overlap.
+
+### `unschedule(handle?)` / `end()`
+
+- `unschedule(handle)` cancels one schedule; `unschedule()` cancels all. Cancelling
+  an unknown/already-cancelled handle is a no-op.
+- `end()` cancels everything, detaches the logger, and renders the instance inert:
+  every subsequent instance method (including a second `end()`) throws
+  `SchedulerEndedError`.
+
+### `static EventChainScheduler.generateSealKeyPair(alg, options?)`
+
+Generates a seal key pair, returning `{ publicKey, secretKey }` (both JWKs, each
+carrying `alg`, `kid`, and `use: "sig"`). Publish `publicKey` in the chain-root
+`sealKey`; keep `secretKey` private and pass it to `scheduleSeal`.
+
+- `alg` — one of `ES256`, `ES384`, `ES512`, `RS256`, `RS384`, `RS512`, `PS256`,
+  `PS384`, `PS512`.
+- `options.kid` — written into both JWKs; defaults to a random UUID.
+- `options.modulusLength` — RSA algorithms only (a `TypeError` for EC). Defaults
+  to 2048 / 3072 / 4096 for the 256 / 384 / 512 families; below the family minimum
+  or above 8192 throws `RangeError`.
 
 ## Namespaces: multiple chains per database
 
