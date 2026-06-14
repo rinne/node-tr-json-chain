@@ -4,6 +4,16 @@ All notable changes to `tr-json-chain` are documented here. This project follows
 [semantic versioning](https://semver.org/); the compatibility promise is about
 the **on-disk chain** (see the README's "Versioning and compatibility").
 
+## 1.0.2
+
+The canonical `seal` JWT carries its `chain-op: "seal"` marker as a **payload
+claim** rather than a protected-header member (see
+[`CANONICAL-EVENTS.md`](CANONICAL-EVENTS.md#seal)) — a better semantic fit and
+portable to JWT libraries that don't expose custom JWS headers. `EventChainScheduler`
+produces seals in this form and the documented verification checks the claim.
+
+No change to the frozen on-disk format, the schema, or any hashing.
+
 ## 1.0.1
 
 **Purely additive — zero changes to the existing API, and nothing touching the

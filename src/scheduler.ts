@@ -455,13 +455,13 @@ export class EventChainScheduler extends EventEmitter {
     }
 
     const now = new Date(this.#clock());
-    const header: Record<string, unknown> = { alg: schedule.alg };
+    const header: Record<string, unknown> = { typ: 'JWT', alg: schedule.alg };
     if (schedule.kid !== undefined) header.kid = schedule.kid;
-    header['chain-op'] = 'seal';
     const claims: Record<string, unknown> = {
       iat: Math.floor(now.getTime() / 1000),
       sub: chainId,
       'sealed-head': sealedHead,
+      'chain-op': 'seal',
     };
     const jws = signCompactJws(schedule.alg as SealAlgorithm, schedule.secretKey as JsonWebKey, header, claims);
 

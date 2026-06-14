@@ -219,13 +219,13 @@ construction the sealed event is always an ancestor of the seal event.
    position is a stable checkpoint.
 2. Build and sign a JWT with the chain's private seal key:
 
-   **Protected header**
+   **Protected header** — a standard JWS/JWT header:
 
    | member | value |
    |---|---|
    | `alg` | the signature algorithm (see below) |
    | `kid` | the key id, if available (per JWT/JWS) |
-   | `chain-op` | `"seal"` (custom extension marking this JWT's purpose) |
+   | `typ` | `"JWT"`, if the signer emits it (optional, conventional) |
 
    **Claims**
 
@@ -234,6 +234,7 @@ construction the sealed event is always an ancestor of the seal event.
    | `iat` | issued-at, Unix timestamp (integer seconds) |
    | `sub` | the chain identifier — the `chain` value from the [`chain-root`](#chain-root) event, verbatim |
    | `sealed-head` | the sealed `event_id` (lowercase hex), identical to the event's `sealed-head` property |
+   | `chain-op` | `"seal"` — marks this JWT's purpose (so a seal token can't be mistaken for, or replayed as, another JWT signed by the same key) |
 
 3. Record the seal event into the chain:
 
@@ -260,7 +261,8 @@ particular `none`) outright.
    be verified — flag them rather than treating them as valid.
 2. For each `seal` event, verify the JWT in `seal` against `sealKey`:
    - the signature is valid and the header `alg` is permitted (never `none`);
-   - the header `chain-op` is `"seal"` (and `kid`, if present, matches the key);
+   - the header `kid`, if present, matches the key;
+   - the `chain-op` claim is `"seal"`;
    - the `sub` claim equals the chain's `chain` identifier;
    - the `sealed-head` claim equals the event's `sealed-head` property.
 3. Confirm `sealed-head` is a real `event_id` present in the chain at an `id`
